@@ -14,27 +14,73 @@ canvas{display:block;width:100vw;height:100vh;cursor:pointer;touch-action:none}
 <canvas id="c"></canvas>
 <img id="catImg" src="cat.gif" style="display:none" alt="">
 <img id="deadImg" src="dead.gif" style="display:none" alt="">
+<button id="fsBtn" style="position:absolute; bottom: 8vh; left: 50%; transform: translateX(-50%); padding: 12px 24px; background: rgba(0, 201, 255, 0.2); border: 2px solid #00c9ff; color: #fff; font-family: 'Segoe UI', sans-serif; font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; display: none; z-index: 10; box-shadow: 0 0 15px rgba(0, 201, 255, 0.5); text-transform: uppercase;">📱 Plein écran (Recommandé)</button>
 <script>
+const fsBtn=document.getElementById('fsBtn');
+const fsHandler = e => {
+  e.preventDefault();
+  e.stopPropagation();
+  if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+  else if(document.documentElement.webkitRequestFullscreen) document.documentElement.webkitRequestFullscreen();
+  fsBtn.style.display='none';
+};
+fsBtn.addEventListener('click', fsHandler);
+fsBtn.addEventListener('touchstart', fsHandler, {passive: false});
+fsBtn.addEventListener('mousedown', e => e.stopPropagation());
+
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
 let V_W=960,V_H=540,scale=1,offsetX=0,offsetY=0;
+let offscreenSpike=null;
+function initOffscreenSpike(){
+  offscreenSpike=document.createElement('canvas');
+  offscreenSpike.width=96;offscreenSpike.height=96;
+  const cctx=offscreenSpike.getContext('2d');cctx.translate(48,48);
+  cctx.shadowColor='#ff2a6d';cctx.shadowBlur=15;
+  const sg=cctx.createLinearGradient(0,-24,0,24);sg.addColorStop(0,'#ff5588');sg.addColorStop(.6,'#ff2a6d');sg.addColorStop(1,'#aa0033');cctx.fillStyle=sg;
+  cctx.beginPath();cctx.moveTo(0,-20);cctx.lineTo(20,24);cctx.lineTo(-20,24);cctx.closePath();cctx.fill();
+  cctx.strokeStyle='rgba(255,255,255,0.7)';cctx.lineWidth=1.5;cctx.stroke();
+  cctx.shadowBlur=0;
+  cctx.strokeStyle='#000';cctx.lineWidth=2;cctx.lineCap='round';
+  cctx.beginPath();cctx.moveTo(-5,-7);cctx.quadraticCurveTo(0,-4,5,-7);cctx.moveTo(-4,-4);cctx.quadraticCurveTo(0,-1,4,-4);cctx.stroke();
+  cctx.fillStyle='#fff';cctx.strokeStyle='#000';cctx.lineWidth=1.5;cctx.lineJoin='miter';
+  cctx.beginPath();cctx.moveTo(-15,-12);cctx.lineTo(-2,-6);cctx.lineTo(-3,-9);cctx.lineTo(-14,-15);cctx.closePath();cctx.fill();cctx.stroke();
+  cctx.beginPath();cctx.moveTo(15,-12);cctx.lineTo(2,-6);cctx.lineTo(3,-9);cctx.lineTo(14,-15);cctx.closePath();cctx.fill();cctx.stroke();
+  cctx.fillStyle='#100003';
+  cctx.beginPath();cctx.moveTo(-12,-4);cctx.lineTo(-2,-3);cctx.lineTo(-6,3);cctx.closePath();cctx.moveTo(12,-4);cctx.lineTo(2,-3);cctx.lineTo(6,3);cctx.closePath();cctx.fill();
+  cctx.fillStyle='#ff1a1a';cctx.save();cctx.shadowColor='#ff0000';cctx.shadowBlur=8;
+  cctx.beginPath();cctx.arc(-7,0,2.5,0,6.28);cctx.arc(7,0,2.5,0,6.28);cctx.fill();cctx.restore();
+  cctx.fillStyle='#fff';cctx.fillRect(-7.5,-2,1,4);cctx.fillRect(6.5,-2,1,4);
+  cctx.fillStyle='#1c0205';cctx.strokeStyle='#000';cctx.lineWidth=1.5;
+  cctx.beginPath();cctx.moveTo(-10,6);cctx.quadraticCurveTo(0,2,10,6);cctx.quadraticCurveTo(8,17,0,17);cctx.quadraticCurveTo(-8,17,-10,6);cctx.closePath();cctx.fill();cctx.stroke();
+  cctx.fillStyle='#ff4d6d';cctx.beginPath();cctx.arc(0,15,4,0,3.14,true);cctx.fill();
+  cctx.fillStyle='#fff';
+  cctx.beginPath();cctx.moveTo(-8,6);cctx.lineTo(-5,6);cctx.lineTo(-7,10);cctx.closePath();cctx.fill();
+  cctx.beginPath();cctx.moveTo(5,6);cctx.lineTo(8,6);cctx.lineTo(7,10);cctx.closePath();cctx.fill();
+  cctx.beginPath();cctx.moveTo(-5,16);cctx.lineTo(-3,13);cctx.lineTo(-2,16);cctx.closePath();cctx.fill();
+  cctx.beginPath();cctx.moveTo(2,16);cctx.lineTo(3,13);cctx.lineTo(5,16);cctx.closePath();cctx.fill();
+}
+initOffscreenSpike();
 function resize(){
   const d=Math.min(window.devicePixelRatio||1,2);
   const screenW=window.innerWidth,screenH=window.innerHeight;
   canvas.width=screenW*d;canvas.height=screenH*d;
   ctx.setTransform(d,0,0,d,0,0);
-  const screenAspect=screenW/screenH;
-  if(screenAspect>=900/540){
-    V_H=540;
-    V_W=540*screenAspect;
-    scale=screenH/V_H;
-    offsetX=0;
-    offsetY=0;
+  if(screenW>=960&&screenH>=540){
+    // Desktop: native 1:1, no scaling
+    V_W=screenW;V_H=screenH;scale=1;offsetX=0;offsetY=0;
   }else{
-    V_W=900;
-    V_H=540;
-    scale=screenW/V_W;
-    offsetX=0;
-    offsetY=(screenH-V_H*scale)/2;
+    // Small screen: scale down to fit, same game world
+    const screenAspect=screenW/screenH;
+    const gameAspect=960/540;
+    if(screenAspect>=gameAspect){
+      // Landscape phone: fit by height
+      scale=screenH/540;
+      V_H=540;V_W=screenW/scale;offsetX=0;offsetY=0;
+    }else{
+      // Portrait / narrow: fit by width, letterbox vertically
+      scale=screenW/960;
+      V_W=960;V_H=540;offsetX=0;offsetY=(screenH-V_H*scale)/2;
+    }
   }
 }
 resize();addEventListener('resize',resize);
@@ -75,6 +121,18 @@ const dPool=new Pool(()=>({x:0,y:0,vx:0,vy:0,s:0,a:1,c:'',l:0,rot:0,vr:0,sh:0}),
 const fxPool=new Pool(()=>({x:0,y:0,vx:0,vy:0,s:0,a:1,l:0,c:''}),80);
 const amPool=new Pool(()=>({x:0,y:0,vx:0,vy:0,s:0,a:1,l:0,c:'',p:0}),50);
 const fwPool=new Pool(()=>({x:0,y:0,vx:0,vy:0,s:0,a:1,c:'',l:0,tr:[]}),200);
+
+// === TROLLS ===
+let trolls=[];
+function initTrolls(){
+  trolls=[
+    { type:'pit', col:87, w:2, triggered:false, val:0, trigDist:220, didShake:false }, 
+    { type:'pit', col:276, w:2, triggered:false, val:0, trigDist:250, didShake:false }, 
+    { type:'blindness', col:315, w:0, triggered:false, val:0, trigDist:0 }, // Blackout flash right before a jump
+    { type:'fake_spike', col:150, w:0, triggered:false, val:0, trigDist:200 } // Spike that shrinks when you get close
+  ];
+}
+initTrolls();
 
 // === STATE ===
 let state='menu',attempts=1,camX=0,progress=0,lastT=0;
@@ -132,11 +190,11 @@ const LD=[
 
   // ═══ S2: PULSE ═══
   [50,1,1],[51,1,1],[52,1,1],[52,0,2],
-  [58,0,2],[63,0,2],[64,0,2],
+  [58,0,2],[63,0,2], // Removed spike at 64
   [70,1,1],[71,1,1],[71,2,1],
   [77,0,2],
   [82,1,1],[83,1,1],[84,1,1],
-  [90,0,2],[91,0,2],
+  [90,0,2], // Removed spike at 91
 
   // ═══ S3: LAUNCH ═══
   [98,0,3],
@@ -239,7 +297,23 @@ totalCoins=LD.filter(d=>d[2]===9).length;
 let levelEnd=0;for(const b of LD){const e=(b[0]+1)*TILE;if(e>levelEnd)levelEnd=e;}levelEnd+=600;
 
 let obs=[];
-function buildObs(){const GY=groundY();obs=LD.map(d=>({t:d[2],x:d[0]*TILE,y:d[3]===1?CEILING_Y+d[1]*TILE:GY-(d[1]+1)*TILE,w:TILE,h:TILE,col:d[0],row:d[1],cl:d[3]===1,flag:d[3]}));}
+function buildObs(){
+  const GY=groundY();
+  obs=LD.map(d=>({t:d[2],x:d[0]*TILE,y:d[3]===1?CEILING_Y+d[1]*TILE:GY-(d[1]+1)*TILE,w:TILE,h:TILE,col:d[0],row:d[1],cl:d[3]===1,flag:d[3]}));
+  
+  // Dynamic Troll Obstacles
+  obs.push({t: 2, x: 74*TILE, y: GY+TILE, w: TILE, h: TILE, col: 74, row: 0, cl: false, troll: 'spike_up', trigDist: 250, val: 0, triggered: false}); // Moved from 68 to 74
+  // Removed fake orb because it triggers off-screen shakes unnecessarily
+  // Moved wall troll further to avoid impossible jump after spike
+  obs.push({t: 1, x: 122*TILE, y: GY+TILE, w: TILE, h: TILE, col: 122, row: 0, troll: 'wall_up', trigDist: 280, val: 0, triggered: false});
+  obs.push({t: 1, x: 122*TILE, y: GY+TILE, w: TILE, h: TILE, col: 122, row: 1, troll: 'wall_up', trigDist: 280, val: 0, triggered: false});
+  
+  // Fake Spike Troll (shrinks into ground)
+  obs.push({t: 2, x: 150*TILE, y: GY-TILE, w: TILE, h: TILE, col: 150, row: 0, cl: false, troll: 'fake_spike', trigDist: 150, val: 0, triggered: false});
+  
+  // Moving Pad Troll
+  obs.push({t: 3, x: 407*TILE, y: GY-TILE, w: TILE, h: TILE, col: 407, row: 0, troll: 'moving_pad', trigDist: 300, val: 0, triggered: false, startX: 407*TILE});
+}
 buildObs();addEventListener('resize',()=>buildObs());
 
 // === PITS / VOIDS — ground gaps the player falls through ===
@@ -252,7 +326,12 @@ const PITS=[
   [491,492],  // S9: under spike-jump arc. Pad@495=1.75t ✓
   [514,515],  // S9: before victory. Jump@513→land@518. Pyramid=safe ✓
 ];
-function isOverPit(x){const col=Math.floor((x+P.w/2)/TILE);for(const p of PITS){if(col>=p[0]&&col<=p[1])return true;}return false;}
+function isOverPit(x){
+  const col=Math.floor((x+P.w/2)/TILE);
+  for(const p of PITS){if(col>=p[0]&&col<=p[1])return true;}
+  for(const t of trolls){if(t.type==='pit'&&t.triggered&&col>=t.col&&col<t.col+t.w)return true;}
+  return false;
+}
 
 // === RESET ===
 function reset(){
@@ -261,6 +340,7 @@ function reset(){
   usedOrbs.clear();usedPortals.clear();usedPads.clear();coins.clear();
   dPool.clear();fxPool.clear();trail=[];gWaves=[];
   shake.i=0;flashA=0;curSec=-1;secA=0;wasOG=false;catShow=0;catTriggered=false;followCount=0;
+  initTrolls();
   buildObs();
   state='play';attempts++;
 }
@@ -293,13 +373,33 @@ function update(dt){
   P.x+=SPD*dt;
   const tcx=Math.max(0,P.x-W()/2);camX+=(tcx-camX)*8*dt;if(Math.abs(camX-tcx)<1)camX=tcx;
 
+  for(const t of trolls){
+    if(t.type==='blindness'){
+      if(!t.triggered && P.x > t.col*TILE){
+        t.triggered=true;
+        tFlash('#000', 0.8); // Black flash right before a spike
+      }
+      continue;
+    }
+    
+    if(!t.triggered && P.x > t.col*TILE - t.trigDist){
+      t.triggered=true;
+    }
+    if(t.type==='pit'&&t.triggered&&!t.didShake){
+      const pitX=t.col*TILE-camX;
+      if(pitX<W()-TILE&&pitX>-TILE*(t.w+1)){tShake(15);t.didShake=true;}
+    }
+    if(t.triggered) t.val+=dt;
+  }
+
   if(gameMode==='cube'){
     P.vy+=GRAVITY*gravFlip*dt;
     P.y+=P.vy*dt;
     P.onG=false;
-    if(gravFlip===1&&P.y+P.h>=GY&&!isOverPit(P.x)){P.y=GY-P.h;P.vy=0;P.onG=true;}
+    const currentlyOverPit = isOverPit(P.x);
+    if(gravFlip===1&&P.y+P.h>=GY&&!currentlyOverPit){P.y=GY-P.h;P.vy=0;P.onG=true;}
     if(gravFlip===-1&&P.y<=CEILING_Y){P.y=CEILING_Y;P.vy=0;P.onG=true;}
-    if(isOverPit(P.x)&&P.y>GY+TILE){die();return;} // fast pit death (1 tile below ground)
+    if(currentlyOverPit&&P.y>GY+10){die();return;} // fast pit death (10px below ground)
     if(P.y>GY+300||P.y<CEILING_Y-300){die();return;}
     if(!P.onG){const vn=Math.abs(P.vy)/820;P.st=1+vn*.15;P.sq=1-vn*.08;}
     else{P.sq+=(1-P.sq)*12*dt;P.st+=(1-P.st)*12*dt;}
@@ -326,10 +426,24 @@ function update(dt){
 
   // Obstacles
   for(const o of obs){
-    if(!o.following) {
+    if(o.troll) {
+      if(!o.triggered && P.x > o.x - o.trigDist) {
+        o.triggered = true;
+      }
+      if(o.triggered) o.val += dt;
+      
+      if(o.troll === 'spike_up' || o.troll === 'wall_up') {
+        o.y = GY + TILE - Math.min(o.val * 3000, TILE * (o.row + 2));
+      } else if(o.troll === 'fake_spike') {
+        o.y = GY - TILE + Math.min(o.val * 2000, TILE); // Shrinks into the ground
+      } else if(o.troll === 'moving_pad') {
+        o.x = o.startX + Math.sin(o.val * 5) * TILE * 1.5; // Moves left and right
+      }
+    } else if(!o.following) {
       o.y=o.cl?CEILING_Y+o.row*TILE:GY-(o.row+1)*TILE;
     }
     const sox=o.x-camX;
+    if(o.troll&&o.triggered&&!o.didShake&&(o.troll==='spike_up'||o.troll==='wall_up')&&sox<W()-40&&sox>-TILE*2){tShake(15);o.didShake=true;}
     if(sox>W()+TILE*2||sox<-TILE*2)continue;
 
     if(o.t===1){
@@ -338,6 +452,9 @@ function update(dt){
         const oL=(P.x+P.w)-o.x,oR=(o.x+o.w)-P.x,oT=(P.y+P.h)-o.y,oB=(o.y+o.h)-P.y;
         const m=Math.min(oL,oR,oT,oB);
         if(gravFlip===1){
+          // if we are falling into a pit, don't let side collisions save us by teleporting up
+          if(P.y+P.h>GY+5) { die(); return; }
+          
           if(m===oT&&P.vy>=0){P.y=o.y-P.h;P.vy=0;P.onG=true;}
           else if(m===oL){die();return;}
           else if(m===oB&&P.vy<0){P.y=o.y+o.h;P.vy=0;}
@@ -501,7 +618,23 @@ function drawGround(){
     const tileCol=Math.floor((sc+c)*ts/TILE);
     let inPit=false;for(const p of PITS){if(tileCol>=p[0]&&tileCol<=p[1]){inPit=true;break;}}
     if(inPit)continue;
-    const wx=c+sc,dk=(wx+r)%2===0;ctx.fillStyle=dk?'rgba(26,10,58,.95)':'rgba(34,14,74,.95)';ctx.fillRect(ox+c*ts,gy+r*ts,ts+1,ts+1);
+    
+    let tY=0,tRot=0;
+    for(const t of trolls){
+      if(t.type==='pit'&&tileCol>=t.col&&tileCol<t.col+t.w){
+        if(t.triggered){tY=t.val*t.val*1200;tRot=t.val*((tileCol%2===0)?2:-2);}
+        break;
+      }
+    }
+    
+    const wx=c+sc,dk=(wx+r)%2===0;
+    ctx.fillStyle=dk?'rgba(26,10,58,.95)':'rgba(34,14,74,.95)';
+    if(tY>0){
+      ctx.save();ctx.translate(ox+c*ts+ts/2,gy+r*ts+ts/2+tY);ctx.rotate(tRot);
+      ctx.fillRect(-ts/2,-ts/2,ts+1,ts+1);ctx.restore();
+    }else{
+      ctx.fillRect(ox+c*ts,gy+r*ts,ts+1,ts+1);
+    }
   }
   // Pit edge effects — glowing danger edges
   for(const pit of PITS){
@@ -530,6 +663,7 @@ function drawGround(){
   for(let x=0;x<w;x+=4){
     const worldX=x+camX,tCol=Math.floor(worldX/TILE);
     let isPit=false;for(const p of PITS){if(tCol>=p[0]&&tCol<=p[1]){isPit=true;break;}}
+    for(const t of trolls){if(t.type==='pit'&&t.triggered&&tCol>=t.col&&tCol<t.col+t.w){isPit=true;break;}}
     let wv=0;for(const gw of gWaves){const d=Math.abs(x-gw.x);if(d<gw.r+60)wv+=Math.sin((d-gw.r)*.1)*8*gw.a*Math.max(0,1-d/(gw.r+60));}
     if(isPit){if(inLine){ctx.stroke();inLine=false;}}else{if(!inLine){ctx.beginPath();ctx.moveTo(x,gy+wv);inLine=true;}else{ctx.lineTo(x,gy+wv);}}
   }
@@ -540,6 +674,7 @@ function drawGround(){
   for(let x=0;x<w;x+=6){
     const tCol=Math.floor((x+camX)/TILE);
     let isPit=false;for(const p of PITS){if(tCol>=p[0]&&tCol<=p[1]){isPit=true;break;}}
+    for(const t of trolls){if(t.type==='pit'&&t.triggered&&tCol>=t.col&&tCol<t.col+t.w){isPit=true;break;}}
     if(isPit){if(inLine){ctx.stroke();inLine=false;}}else{if(!inLine){ctx.beginPath();ctx.moveTo(x,gy);inLine=true;}else{ctx.lineTo(x,gy);}}
   }
   if(inLine)ctx.stroke();
@@ -557,84 +692,23 @@ function drawObs(){
       ctx.save();ctx.shadowColor=C.blockE;ctx.shadowBlur=8+Math.sin(t*3+o.col)*3;ctx.strokeStyle=C.blockE;ctx.lineWidth=1.5;ctx.strokeRect(ox+.5,oy+.5,TILE-1,TILE-1);ctx.restore();
       const xp=Math.sin(t*2+o.col*.5)*.15;ctx.strokeStyle=`rgba(123,79,255,${.2+xp})`;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(ox+6,oy+6);ctx.lineTo(ox+TILE-6,oy+TILE-6);ctx.moveTo(ox+TILE-6,oy+6);ctx.lineTo(ox+6,oy+TILE-6);ctx.stroke();
     }else if(o.t===2){
-      ctx.save();const dp=.3+Math.sin(t*6+o.col)*.2;ctx.shadowColor=C.spike;ctx.shadowBlur=12+Math.sin(t*4+o.col)*5;
-      const sg=ctx.createLinearGradient(ox,oy,ox,oy+TILE);sg.addColorStop(0,'#ff5588');sg.addColorStop(.6,'#ff2a6d');sg.addColorStop(1,'#aa0033');ctx.fillStyle=sg;
+      ctx.save();const dp=.3+Math.sin(t*6+o.col)*.2;
+      if(!o.following){
+        ctx.shadowColor=C.spike;ctx.shadowBlur=12+Math.sin(t*4+o.col)*5;
+        const sg=ctx.createLinearGradient(ox,oy,ox,oy+TILE);sg.addColorStop(0,'#ff5588');sg.addColorStop(.6,'#ff2a6d');sg.addColorStop(1,'#aa0033');ctx.fillStyle=sg;
+      }
       if(o.following){
         ctx.translate(ox+TILE/2,oy+TILE/2);
         ctx.rotate(o.angle+Math.PI/2);
-        ctx.beginPath();
-        ctx.moveTo(0,-TILE/2+4);
-        ctx.lineTo(TILE/2-4,TILE/2);
-        ctx.lineTo(-TILE/2+4,TILE/2);
-        ctx.closePath();ctx.fill();
-        ctx.strokeStyle=`rgba(255,255,255,${.5+dp})`;ctx.lineWidth=1.2;ctx.stroke();
-
-        // Ultra-angry face inside following spikes
+        // Draw cached sprite (spike + angry face + glow — all pre-rendered)
+        ctx.drawImage(offscreenSpike,-48,-48,96,96);
+        // Tiny animated anger vein 💢 overlay (only 4 strokes per spike)
         ctx.save();
-        
-        // 1. Eyebrows
-        ctx.strokeStyle='#ffffff';ctx.lineWidth=2.5;ctx.lineCap='round';
-        ctx.beginPath();
-        ctx.moveTo(-11,-7);ctx.lineTo(-2,-3);
-        ctx.moveTo(11,-7);ctx.lineTo(2,-3);
-        ctx.stroke();
-
-        // 2. Red glowing eyes with white pupils
-        ctx.save();
-        ctx.fillStyle='#ff1a1a';
-        ctx.shadowColor='#ff0000';
-        ctx.shadowBlur=8;
-        ctx.beginPath();
-        ctx.arc(-6,1,3.5,0,6.28);
-        ctx.arc(6,1,3.5,0,6.28);
-        ctx.fill();
-        ctx.restore();
-        
-        // Pupils (white dots in center)
-        ctx.fillStyle='#ffffff';
-        ctx.beginPath();
-        ctx.arc(-6,1,1,0,6.28);
-        ctx.arc(6,1,1,0,6.28);
-        ctx.fill();
-
-        // 3. Growling mouth
-        ctx.fillStyle='#111111';
-        ctx.beginPath();
-        ctx.moveTo(-7,8);
-        ctx.quadraticCurveTo(0,5,7,8);
-        ctx.quadraticCurveTo(5,15,0,15);
-        ctx.quadraticCurveTo(-5,15,-7,8);
-        ctx.closePath();
-        ctx.fill();
-        
-        ctx.strokeStyle='#ffffff';
-        ctx.lineWidth=1;
-        ctx.stroke();
-        
-        // Zig-zag teeth
-        ctx.strokeStyle='#ffffff';
-        ctx.lineWidth=1;
-        ctx.beginPath();
-        ctx.moveTo(-6,8);ctx.lineTo(-4,10.5);ctx.lineTo(-2,8);ctx.lineTo(0,10.5);ctx.lineTo(2,8);ctx.lineTo(4,10.5);ctx.lineTo(6,8);
-        ctx.moveTo(-5,13.5);ctx.lineTo(-3,11);ctx.lineTo(-1,13.5);ctx.lineTo(1,11);ctx.lineTo(3,13.5);
-        ctx.stroke();
-
-        // 4. Anime anger vein 💢
-        ctx.save();
-        ctx.strokeStyle='#ff1a1a';
-        ctx.lineWidth=2.2;
-        ctx.lineCap='round';
-        ctx.shadowColor='#ff1a1a';
-        ctx.shadowBlur=6;
-        ctx.translate(11,-12);
-        const pulse=1+Math.sin(gTime*12)*0.2;
-        ctx.scale(pulse*0.6,pulse*0.6);
-        ctx.beginPath();ctx.moveTo(-3,-7);ctx.quadraticCurveTo(-1,0,-3,7);ctx.stroke();
-        ctx.beginPath();ctx.moveTo(3,-7);ctx.quadraticCurveTo(1,0,3,7);ctx.stroke();
-        ctx.beginPath();ctx.moveTo(-7,-3);ctx.quadraticCurveTo(0,-1,7,-3);ctx.stroke();
-        ctx.beginPath();ctx.moveTo(-7,3);ctx.quadraticCurveTo(0,1,7,3);ctx.stroke();
-        ctx.restore();
-
+        ctx.strokeStyle='#ff1a1a';ctx.lineWidth=2;ctx.lineCap='round';
+        ctx.translate(14,-16);
+        const pulse=1+Math.sin(gTime*12+o.followId)*0.25;
+        ctx.scale(pulse*0.55,pulse*0.55);
+        ctx.beginPath();ctx.moveTo(-3,-7);ctx.quadraticCurveTo(-1,0,-3,7);ctx.moveTo(3,-7);ctx.quadraticCurveTo(1,0,3,7);ctx.moveTo(-7,-3);ctx.quadraticCurveTo(0,-1,7,-3);ctx.moveTo(-7,3);ctx.quadraticCurveTo(0,1,7,3);ctx.stroke();
         ctx.restore();
       }else{
         ctx.beginPath();
@@ -653,9 +727,11 @@ function drawObs(){
       ctx.restore();
     }else if(o.t===4){
       ctx.save();const op=1+Math.sin(t*6)*.2,r=TILE*.35*op,cx=ox+TILE/2,cy=oy+TILE/2;
-      ctx.strokeStyle=`rgba(255,221,0,${.15+Math.sin(t*4)*.1})`;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(cx,cy,r*2,0,6.28);ctx.stroke();
-      ctx.strokeStyle=`rgba(255,221,0,${.2+Math.sin(t*5)*.1})`;ctx.lineWidth=1;ctx.beginPath();ctx.arc(cx,cy,r*1.5,0,6.28);ctx.stroke();
-      ctx.shadowColor='#ffdd00';ctx.shadowBlur=25+op*8;const og=ctx.createRadialGradient(cx-r*.3,cy-r*.3,0,cx,cy,r);og.addColorStop(0,'#fff');og.addColorStop(.3,'#ffee44');og.addColorStop(1,'#ddaa00');ctx.fillStyle=og;ctx.beginPath();ctx.arc(cx,cy,r,0,6.28);ctx.fill();ctx.shadowBlur=0;
+      let oC1='rgba(255,221,0,',oC2='#ffdd00',oC3='#ffee44',oC4='#ddaa00';
+      if(o.troll==='fake_orb'&&o.triggered){oC1='rgba(255,0,0,';oC2='#ff0000';oC3='#ff5555';oC4='#aa0000';}
+      ctx.strokeStyle=`${oC1}${.15+Math.sin(t*4)*.1})`;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(cx,cy,r*2,0,6.28);ctx.stroke();
+      ctx.strokeStyle=`${oC1}${.2+Math.sin(t*5)*.1})`;ctx.lineWidth=1;ctx.beginPath();ctx.arc(cx,cy,r*1.5,0,6.28);ctx.stroke();
+      ctx.shadowColor=oC2;ctx.shadowBlur=25+op*8;const og=ctx.createRadialGradient(cx-r*.3,cy-r*.3,0,cx,cy,r);og.addColorStop(0,'#fff');og.addColorStop(.3,oC3);og.addColorStop(1,oC4);ctx.fillStyle=og;ctx.beginPath();ctx.arc(cx,cy,r,0,6.28);ctx.fill();ctx.shadowBlur=0;
       ctx.fillStyle='rgba(255,255,255,.6)';ctx.beginPath();ctx.arc(cx-r*.25,cy-r*.25,r*.35,0,6.28);ctx.fill();
       for(let i=0;i<4;i++){const sa=t*3+i*1.57,sr=r*1.3;ctx.fillStyle=`rgba(255,255,200,${.5+Math.sin(t*8+i)*.3})`;ctx.beginPath();ctx.arc(cx+Math.cos(sa)*sr,cy+Math.sin(sa)*sr,1.5,0,6.28);ctx.fill();}
       ctx.restore();
@@ -1094,6 +1170,14 @@ function loop(ts){
     ctx.strokeRect(0,0,w,h);ctx.restore();
   }
   ctx.restore();
+  
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 960;
+  if(state==='menu' && isMobile && !document.fullscreenElement && !document.webkitFullscreenElement){
+    if(fsBtn.style.display!=='block') fsBtn.style.display='block';
+  } else {
+    if(fsBtn.style.display!=='none') fsBtn.style.display='none';
+  }
+
   requestAnimationFrame(loop);
 }
 P.x=100;P.y=groundY()-P.h;requestAnimationFrame(loop);
