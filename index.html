@@ -16,9 +16,29 @@ canvas{display:block;width:100vw;height:100vh;cursor:pointer;touch-action:none}
 <img id="deadImg" src="dead.gif" style="display:none" alt="">
 <script>
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
-function resize(){const d=Math.min(window.devicePixelRatio||1,2);canvas.width=innerWidth*d;canvas.height=innerHeight*d;ctx.setTransform(d,0,0,d,0,0);}
+let V_W=960,V_H=540,scale=1,offsetX=0,offsetY=0;
+function resize(){
+  const d=Math.min(window.devicePixelRatio||1,2);
+  const screenW=window.innerWidth,screenH=window.innerHeight;
+  canvas.width=screenW*d;canvas.height=screenH*d;
+  ctx.setTransform(d,0,0,d,0,0);
+  const screenAspect=screenW/screenH;
+  if(screenAspect>=900/540){
+    V_H=540;
+    V_W=540*screenAspect;
+    scale=screenH/V_H;
+    offsetX=0;
+    offsetY=0;
+  }else{
+    V_W=900;
+    V_H=540;
+    scale=screenW/V_W;
+    offsetX=0;
+    offsetY=(screenH-V_H*scale)/2;
+  }
+}
 resize();addEventListener('resize',resize);
-let W=()=>innerWidth,H=()=>innerHeight;
+let W=()=>V_W,H=()=>V_H;
 
 // === PHYSICS ===
 const TILE=48,GRAVITY=2600,JUMP_VEL=-820,BASE_SPEED=400,PAD_VEL=-1100,ORB_VEL=-900;
@@ -410,22 +430,20 @@ function update(dt){
       if(!o.following && P.x > o.x + TILE * 1.2){
         o.following = true;
         o.followId = followCount++;
-        o.followPhase = Math.random() * 6.28;
-        // Amplitude et fréquence douces (sans spam)
-        o.followAmp = 15 + Math.random() * 20;
-        o.followFreq = 1.0 + Math.random() * 1.5;
-        // Décalage pour qu'ils s'étalent en hauteur (verticalement) et non en file indienne
-        o.followXOffset = 80 + Math.random() * 25; // Distance horizontale similaire pour tous
-        o.followYOffset = ((o.followId % 5) - 2) * 45 + Math.random() * 15; // Étalement vertical (-90, -45, 0, 45, 90)
       }
       if(o.following){
-        const targetX = P.x - o.followXOffset;
-        const wave = Math.sin(gTime * o.followFreq + o.followPhase) * o.followAmp;
-        const targetY = P.y + (P.h - TILE)/2 + o.followYOffset + wave;
+        const col = Math.floor(o.followId / 3);
+        const row = o.followId % 3;
+        const followXOffset = 60 + col * 48;
+        const followYOffset = -60 + row * 60;
+        const followPhase = row * 1.5 + col * 0.8;
         
-        // Lissage du mouvement
-        o.x += (targetX - o.x) * 4 * dt;
-        o.y += (targetY - o.y) * 4 * dt;
+        const targetX = P.x - followXOffset;
+        const wave = Math.sin(gTime * 1.8 + followPhase) * 35;
+        const targetY = P.y + (P.h - TILE)/2 + followYOffset + wave;
+        
+        o.x += (targetX - o.x) * 4.5 * dt;
+        o.y += (targetY - o.y) * 4.5 * dt;
         
         // Point towards the player
         const dx = (P.x + P.w/2) - (o.x + TILE/2);
@@ -551,28 +569,72 @@ function drawObs(){
         ctx.closePath();ctx.fill();
         ctx.strokeStyle=`rgba(255,255,255,${.5+dp})`;ctx.lineWidth=1.2;ctx.stroke();
 
-        // Visage ULTRA énervé
+        // Ultra-angry face inside following spikes
         ctx.save();
-        // Sourcils rouges et très inclinés
-        ctx.strokeStyle='#ff0000';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.beginPath();
-        ctx.moveTo(-11,-7);ctx.lineTo(-2,-1);
-        ctx.moveTo(11,-7);ctx.lineTo(2,-1);
+        
+        // 1. Eyebrows
+        ctx.strokeStyle='#ffffff';ctx.lineWidth=2.5;ctx.lineCap='round';
+        ctx.beginPath();
+        ctx.moveTo(-11,-7);ctx.lineTo(-2,-3);
+        ctx.moveTo(11,-7);ctx.lineTo(2,-3);
         ctx.stroke();
 
-        // Yeux brillants
-        ctx.fillStyle='#ffffff';ctx.beginPath();
-        ctx.ellipse(-5, 2.5, 3, 2, Math.PI/4, 0, 6.28);
-        ctx.ellipse(5, 2.5, 3, 2, -Math.PI/4, 0, 6.28);
+        // 2. Red glowing eyes with white pupils
+        ctx.save();
+        ctx.fillStyle='#ff1a1a';
+        ctx.shadowColor='#ff0000';
+        ctx.shadowBlur=8;
+        ctx.beginPath();
+        ctx.arc(-6,1,3.5,0,6.28);
+        ctx.arc(6,1,3.5,0,6.28);
         ctx.fill();
-        ctx.fillStyle='#ff0000';ctx.shadowColor='#ff0000';ctx.shadowBlur=12;ctx.beginPath();
-        ctx.arc(-4.5, 2.5, 1.5, 0, 6.28);
-        ctx.arc(4.5, 2.5, 1.5, 0, 6.28);
-        ctx.fill();ctx.shadowBlur=0;
+        ctx.restore();
+        
+        // Pupils (white dots in center)
+        ctx.fillStyle='#ffffff';
+        ctx.beginPath();
+        ctx.arc(-6,1,1,0,6.28);
+        ctx.arc(6,1,1,0,6.28);
+        ctx.fill();
 
-        // Bouche en zigzag plus féroce
-        ctx.strokeStyle='#ffffff';ctx.lineWidth=2;ctx.lineJoin='round';ctx.beginPath();
-        ctx.moveTo(-7,10);ctx.lineTo(-3.5,6);ctx.lineTo(0,12);ctx.lineTo(3.5,6);ctx.lineTo(7,10);
+        // 3. Growling mouth
+        ctx.fillStyle='#111111';
+        ctx.beginPath();
+        ctx.moveTo(-7,8);
+        ctx.quadraticCurveTo(0,5,7,8);
+        ctx.quadraticCurveTo(5,15,0,15);
+        ctx.quadraticCurveTo(-5,15,-7,8);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.strokeStyle='#ffffff';
+        ctx.lineWidth=1;
         ctx.stroke();
+        
+        // Zig-zag teeth
+        ctx.strokeStyle='#ffffff';
+        ctx.lineWidth=1;
+        ctx.beginPath();
+        ctx.moveTo(-6,8);ctx.lineTo(-4,10.5);ctx.lineTo(-2,8);ctx.lineTo(0,10.5);ctx.lineTo(2,8);ctx.lineTo(4,10.5);ctx.lineTo(6,8);
+        ctx.moveTo(-5,13.5);ctx.lineTo(-3,11);ctx.lineTo(-1,13.5);ctx.lineTo(1,11);ctx.lineTo(3,13.5);
+        ctx.stroke();
+
+        // 4. Anime anger vein 💢
+        ctx.save();
+        ctx.strokeStyle='#ff1a1a';
+        ctx.lineWidth=2.2;
+        ctx.lineCap='round';
+        ctx.shadowColor='#ff1a1a';
+        ctx.shadowBlur=6;
+        ctx.translate(11,-12);
+        const pulse=1+Math.sin(gTime*12)*0.2;
+        ctx.scale(pulse*0.6,pulse*0.6);
+        ctx.beginPath();ctx.moveTo(-3,-7);ctx.quadraticCurveTo(-1,0,-3,7);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(3,-7);ctx.quadraticCurveTo(1,0,3,7);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(-7,-3);ctx.quadraticCurveTo(0,-1,7,-3);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(-7,3);ctx.quadraticCurveTo(0,1,7,3);ctx.stroke();
+        ctx.restore();
+
         ctx.restore();
       }else{
         ctx.beginPath();
@@ -1010,7 +1072,13 @@ function drawIntro(){
 // === LOOP ===
 function loop(ts){
   const dt=lastT?(ts-lastT)/1000:1/60;lastT=ts;update(dt);
-  const w=W(),h=H();ctx.clearRect(0,0,w,h);
+  ctx.save();ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.restore();
+  const w=W(),h=H();
+  ctx.save();
+  ctx.translate(offsetX,offsetY);
+  ctx.scale(scale,scale);
   ctx.save();ctx.translate(shake.x,shake.y);
   if(gravAnim>0){ctx.translate(w/2,h/2);ctx.rotate(Math.sin(gravAnim*3.14)*.06);ctx.translate(-w/2,-h/2);}
   drawBG();if(state==='play'||state==='dead')drawSpdLines();drawGround();drawObs();drawTrail();drawPart();
@@ -1020,7 +1088,13 @@ function loop(ts){
   if(state==='dead'){drawPart();drawDeath();drawHUD();}
   if(state==='menu')drawMenu();
   if(state==='win'){drawPart();drawWin();}
-  ctx.restore();requestAnimationFrame(loop);
+  ctx.restore();
+  if(offsetY>0||offsetX>0){
+    ctx.save();ctx.strokeStyle=C.c1;ctx.lineWidth=4;ctx.shadowColor=C.c1;ctx.shadowBlur=15;
+    ctx.strokeRect(0,0,w,h);ctx.restore();
+  }
+  ctx.restore();
+  requestAnimationFrame(loop);
 }
 P.x=100;P.y=groundY()-P.h;requestAnimationFrame(loop);
 </script>
