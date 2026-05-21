@@ -150,8 +150,8 @@ canvas{display:block;width:100vw;height:100vh;cursor:pointer;touch-action:none}
 
 <!-- CONTENEUR DU CHAT ROBLOX -->
 <div id="chatContainer" style="display:none; position:absolute; top:20px; left:20px; width:340px; font-family:'Courier New',monospace; z-index:200; pointer-events:none;">
-  <div id="chatHistory" style="height:180px; overflow-y:auto; background:rgba(10,5,25,0.55); border:1.5px solid rgba(0,255,135,0.25); border-radius:6px; padding:8px; color:#fff; font-size:12px; margin-bottom:6px; box-shadow:0 0 15px rgba(0,255,135,0.05); pointer-events:auto; display:flex; flex-direction:column; gap:4px;"></div>
-  <input id="chatInput" type="text" placeholder="Appuyez sur Entrée pour parler..." style="width:100%; padding:8px 12px; background:rgba(10,5,25,0.85); border:2px solid #00ff87; border-radius:20px; color:#fff; font-size:12px; outline:none; box-shadow:0 0 10px rgba(0,255,135,0.25); pointer-events:auto; display:none;">
+  <div id="chatHistory" style="height:180px; overflow-y:auto; background:rgba(10,5,25,0.55); border:1.5px solid rgba(0,255,135,0.25); border-radius:6px; padding:8px; color:#fff; font-size:12px; margin-bottom:6px; box-shadow:0 0 15px rgba(0,255,135,0.05); pointer-events:auto;"></div>
+  <input id="chatInput" type="text" maxlength="120" placeholder="Appuyez sur Entrée pour parler..." style="width:100%; padding:8px 12px; background:rgba(10,5,25,0.85); border:2px solid #00ff87; border-radius:20px; color:#fff; font-size:12px; outline:none; box-shadow:0 0 10px rgba(0,255,135,0.25); pointer-events:auto; display:none;">
 </div>
 
 <button id="mpQuitBtn" style="display:none; position:absolute; top:20px; right:20px; padding:10px 22px; background:rgba(255,0,85,0.2); border:2px solid #ff0055; color:#fff; font-family:'Segoe UI',sans-serif; font-size:12px; font-weight:800; border-radius:20px; cursor:pointer; text-transform:uppercase; letter-spacing:1px; box-shadow:0 0 15px rgba(255,0,85,0.3); transition:all 0.2s ease; z-index:200;" onmouseover="this.style.background='rgba(255,0,85,0.55)'; this.style.boxShadow='0 0 20px rgba(255,0,85,0.6)'; this.style.transform='scale(1.05)';" onmouseout="this.style.background='rgba(255,0,85,0.2)'; this.style.boxShadow='0 0 15px rgba(255,0,85,0.3)'; this.style.transform='scale(1)';">
@@ -4613,7 +4613,19 @@ function loop(ts){
     ctx.font = 'bold 11px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillText(mp.nickname + ' (Vous)', P.x - camX + P.w / 2, P.y - 8);
+    let px = P.x - camX + P.w / 2;
+    let py = P.y - 8;
+    ctx.fillText(mp.nickname + ' (Vous)', px, py);
+    
+    // Draw local player chat bubble
+    if (mp.myChatMsg) {
+      let timeLeft = mp.myChatMsg.expires - Date.now();
+      if (timeLeft > 0) {
+        let alpha = timeLeft < 500 ? timeLeft / 500 : 1;
+        drawChatBubble(ctx, mp.myChatMsg.text, px, py - 14, '#00ff87', alpha);
+      }
+    }
+    
     ctx.restore();
   }
   
@@ -4737,9 +4749,24 @@ function connectMQTT() {
         try {
           const chat = JSON.parse(payloadStr);
           addChatUserMessage(chat.sender, chat.text);
-          // Track in local history
-          mp.chatHistory.push({ sender: chat.sender, text: chat.text, t: Date.now() });
-          if (mp.chatHistory.length > 30) mp.chatHistory.shift();
+          // Set chat bubble for the sender
+          const expiration = Date.now() + 5000;
+          if (chat.sender === mp.nickname) {
+            mp.myChatMsg = { text: chat.text, expires: expiration };
+          } else {
+            // Find player by nickname
+            for (const id in mp.players) {
+              if (mp.players[id].nickname === chat.sender) {
+                mp.players[id].chatMsg = { text: chat.text, expires: expiration };
+                break;
+              }
+            }
+          }
+          // Track in local history if it's not from us (since we already added it when sending)
+          if (chat.sender !== mp.nickname) {
+            mp.chatHistory.push({ sender: chat.sender, text: chat.text, t: Date.now() });
+            if (mp.chatHistory.length > 30) mp.chatHistory.shift();
+          }
         } catch (e) {}
         return;
       }
@@ -4957,6 +4984,9 @@ function sendChatMessage() {
     });
     mp.client.publish(topic, payload, { qos: 0, retain: false });
     
+    // Set local chat bubble immediately
+    mp.myChatMsg = { text: text, expires: Date.now() + 5000 };
+    
     // Update retained chat history for new joiners
     mp.chatHistory.push({ sender: mp.nickname, text: text, t: Date.now() });
     if (mp.chatHistory.length > 30) mp.chatHistory.shift();
@@ -4971,6 +5001,7 @@ function addChatUserMessage(sender, text) {
   if (!history) return;
   
   const div = document.createElement('div');
+  div.style.marginBottom = '4px';
   const isMe = sender === mp.nickname;
   const color = isMe ? '#00ff87' : '#ff0055';
   const nameLabel = isMe ? `${sender} (Vous)` : sender;
@@ -4989,6 +5020,7 @@ function addChatSystemMessage(text) {
   if (!history) return;
   
   const div = document.createElement('div');
+  div.style.marginBottom = '4px';
   div.innerHTML = `<span style="color:#00ffff; font-style:italic; font-weight:bold; text-shadow:0 0 4px #00ffff;">⚡ [SYSTÈME]: ${text}</span>`;
   history.appendChild(div);
   
@@ -5098,14 +5130,70 @@ function updateSandbox(dt) {
     if (trail[i].a <= 0) trail.splice(i, 1);
   }
   
+  // Remote players interpolation
+  for (const id in mp.players) {
+    const r = mp.players[id];
+    if (r.rx !== undefined) {
+      r.rx += (r.x - r.rx) * (1 - Math.exp(-20 * dt));
+      r.ry += (r.y - r.ry) * (1 - Math.exp(-20 * dt));
+    }
+  }
+  
   updPart(dt);
   
-  // Publish positional packets at throttled 45ms rate
+  // Publish positional packets at throttled 30ms rate
   const now = Date.now();
-  if (now - mp.lastPublishTime >= 45) {
+  if (now - mp.lastPublishTime >= 30) {
     mp.lastPublishTime = now;
     publishPosition();
   }
+}
+
+function drawChatBubble(ctx, text, x, y, color, alpha = 1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = 'bold 12px "Segoe UI", sans-serif';
+  let displayText = text;
+  if (displayText.length > 35) {
+    displayText = displayText.substring(0, 32) + '...';
+  }
+  const textWidth = ctx.measureText(displayText).width;
+  const paddingX = 8;
+  const paddingY = 6;
+  const boxW = textWidth + paddingX * 2;
+  const boxH = 12 + paddingY * 2;
+  
+  ctx.translate(x, y);
+  
+  // Draw bubble background
+  ctx.fillStyle = 'rgba(15, 5, 30, 0.85)';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 8;
+  
+  ctx.beginPath();
+  ctx.roundRect(-boxW / 2, -boxH, boxW, boxH, 8);
+  ctx.fill();
+  ctx.stroke();
+  
+  // Draw small tail
+  ctx.beginPath();
+  ctx.moveTo(-5, 0);
+  ctx.lineTo(5, 0);
+  ctx.lineTo(0, 5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  
+  // Draw text
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(displayText, 0, -boxH / 2);
+  
+  ctx.restore();
 }
 
 function drawRemotePlayers() {
@@ -5116,9 +5204,6 @@ function drawRemotePlayers() {
     if (r.rx === undefined) {
       r.rx = r.x;
       r.ry = r.y;
-    } else {
-      r.rx += (r.x - r.rx) * 0.25;
-      r.ry += (r.y - r.ry) * 0.25;
     }
     
     ctx.save();
@@ -5161,7 +5246,19 @@ function drawRemotePlayers() {
     ctx.font = 'bold 11px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillText(r.nickname || 'Joueur', r.rx - camX + P.w / 2, r.ry - 8);
+    
+    let px = r.rx - camX + P.w / 2;
+    let py = r.ry - 8;
+    ctx.fillText(r.nickname || 'Joueur', px, py);
+    
+    if (r.chatMsg) {
+      let timeLeft = r.chatMsg.expires - Date.now();
+      if (timeLeft > 0) {
+        let alpha = timeLeft < 500 ? timeLeft / 500 : 1;
+        drawChatBubble(ctx, r.chatMsg.text, px, py - 14, c1, alpha);
+      }
+    }
+    
     ctx.restore();
   }
   ctx.restore();
