@@ -4604,8 +4604,9 @@ function loop(ts){
   drawBossLasers();
   if(state==='play'||state==='countdown'||(state==='introCinematic' && introCinematicTimer >= 2.8)) drawPlayer();
   if(state==='multiplayerSandbox') {
-    drawPlayer();
-    drawRemotePlayers();
+    drawRemotePlayers(); // FIRST draw others
+    drawPlayer();        // THEN draw local player on top!
+    
     ctx.save();
     ctx.fillStyle = '#00ff87';
     ctx.shadowColor = C.c1;
@@ -4729,15 +4730,25 @@ function connectMQTT() {
             const absoluteY = data.y + groundY();
             if (!mp.players[playerId]) {
               mp.players[playerId] = { rx: data.x, ry: absoluteY };
-              addChatSystemMessage(`👋 ${data.nickname} a rejoint le monde !`);
+              addChatSystemMessage(`👋 ${data.n || data.nickname} a rejoint le monde !`);
+              
+              // If we just joined the room, teleport to the first player we see so we aren't lost at spawn
+              if (mp.justJoined) {
+                P.x = data.x;
+                P.y = absoluteY - P.h;
+                sandboxP.vx = 0;
+                camX = Math.max(0, P.x - W() / 2);
+                mp.justJoined = false;
+                addChatSystemMessage(`🚀 Téléportation vers ${data.n || data.nickname} !`);
+              }
             }
             mp.players[playerId].x = data.x;
             mp.players[playerId].y = absoluteY;
-            mp.players[playerId].rot = data.rot;
-            mp.players[playerId].sliding = data.sliding;
-            mp.players[playerId].color1 = data.color1;
-            mp.players[playerId].color2 = data.color2;
-            mp.players[playerId].nickname = data.nickname;
+            mp.players[playerId].rot = data.r !== undefined ? data.r : data.rot;
+            mp.players[playerId].sliding = data.s !== undefined ? !!data.s : data.sliding;
+            mp.players[playerId].color1 = data.c1 || data.color1;
+            mp.players[playerId].color2 = data.c2 || data.color2;
+            mp.players[playerId].nickname = data.n || data.nickname;
             mp.players[playerId].lastUpdate = Date.now();
           } catch (e) {}
         }
@@ -4828,7 +4839,7 @@ function startLobbyPublisher() {
     const now = Date.now();
     if (state === 'multiplayerSandbox') {
       for (const id in mp.players) {
-        if (now - mp.players[id].lastUpdate > 6000) {
+        if (now - mp.players[id].lastUpdate > 12000) {
           addChatSystemMessage(`💀 ${mp.players[id].nickname} est parti (déconnexion)`);
           delete mp.players[id];
         }
@@ -4890,6 +4901,7 @@ function joinWorld(id, name, host) {
   mp.players = {};
   mp.chatHistory = [];
   mp.chatHistoryLoaded = false;
+  mp.justJoined = (host !== mp.nickname);
   state = 'multiplayerSandbox';
   
   // Position flat on floor
@@ -5041,14 +5053,13 @@ function publishPosition() {
   if (mp.client && mp.currentWorld) {
     const topic = `neon-rush/worlds/${mp.currentWorld.id}/players/${mp.myId}`;
     const payload = JSON.stringify({
-      x: P.x,
-      y: P.y - groundY(),
-      rot: P.rot,
-      sliding: P.sliding,
-      color1: mp.myColors.c1,
-      color2: mp.myColors.c2,
-      nickname: mp.nickname,
-      timestamp: Date.now()
+      x: Math.round(P.x),
+      y: Math.round(P.y - groundY()),
+      r: Number(P.rot.toFixed(2)),
+      s: P.sliding ? 1 : 0,
+      c1: mp.myColors.c1,
+      c2: mp.myColors.c2,
+      n: mp.nickname
     });
     mp.client.publish(topic, payload, { qos: 0, retain: false });
   }
@@ -5267,6 +5278,41 @@ function drawRemotePlayers() {
     }
     
     ctx.restore();
+    
+    // Draw off-screen indicator if player is outside the camera view
+    if (px < -20 || px > W() + 20) {
+      ctx.save();
+      let isLeft = px < 0;
+      let indX = isLeft ? 30 : W() - 30;
+      let indY = r.ry + P.h/2;
+      indY = Math.max(40, Math.min(H() - 40, indY));
+      
+      ctx.translate(indX, indY);
+      
+      // Triangle pointing left or right
+      ctx.beginPath();
+      if (isLeft) {
+        ctx.moveTo(-10, 0); ctx.lineTo(10, -10); ctx.lineTo(10, 10);
+      } else {
+        ctx.moveTo(10, 0); ctx.lineTo(-10, -10); ctx.lineTo(-10, 10);
+      }
+      ctx.closePath();
+      
+      ctx.fillStyle = c1;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+      
+      // Initials of nickname
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText((r.nickname || 'J').substring(0, 2).toUpperCase(), isLeft ? 22 : -22, 0);
+      ctx.restore();
+    }
+    
   }
   ctx.restore();
 }
