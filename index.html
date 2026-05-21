@@ -51,13 +51,18 @@ canvas{display:block;width:100vw;height:100vh;cursor:pointer;touch-action:none}
 <img id="deadImg" src="dead.gif" style="display:none" alt="">
 <button id="fsBtn">📱 Plein écran (Recommandé)</button>
 <audio id="bgMusic" src="Velocity_Park.mp3" preload="auto" loop></audio>
+<audio id="deathMusic" src="cat-laughing-at-you.mp3" preload="auto"></audio>
 <script>
 const bgMusic=document.getElementById('bgMusic');
 bgMusic.volume=0.5;
+const deathMusic=document.getElementById('deathMusic');
+deathMusic.volume=0.65;
 let musicStarted=false;
 function startMusic(){
-  if(musicStarted)return;
-  musicStarted=true;
+  if(deathMusic){
+    deathMusic.pause();
+    deathMusic.currentTime=0;
+  }
   bgMusic.currentTime=0;
   const p=bgMusic.play();
   if(p&&p.catch)p.catch(()=>{});
@@ -69,7 +74,12 @@ const fsHandler = e => {
   if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
   else if(document.documentElement.webkitRequestFullscreen) document.documentElement.webkitRequestFullscreen();
   fsBtn.style.display='none';
-  startMusic();
+  
+  // Unlocking audio nodes on first user interaction
+  const p1 = bgMusic.play();
+  if(p1 && p1.then) p1.then(() => bgMusic.pause()).catch(()=>{});
+  const p2 = deathMusic.play();
+  if(p2 && p2.then) p2.then(() => deathMusic.pause()).catch(()=>{});
 };
 fsBtn.addEventListener('click', fsHandler);
 fsBtn.addEventListener('touchstart', fsHandler, {passive: false});
@@ -255,11 +265,42 @@ function initTrolls(){
 }
 initTrolls();
 
+let bossLasers = [];
+
+function initBossLasers() {
+  bossLasers = [
+    { col: 454, type: 'high', state: 'inactive', timer: 0, triggered: false },
+    { col: 461, type: 'low',  state: 'inactive', timer: 0, triggered: false },
+    { col: 469, type: 'high', state: 'inactive', timer: 0, triggered: false },
+    { col: 482, type: 'low',  state: 'inactive', timer: 0, triggered: false },
+    { col: 492, type: 'high', state: 'inactive', timer: 0, triggered: false },
+    { col: 506, type: 'low',  state: 'inactive', timer: 0, triggered: false },
+    { col: 512, type: 'high', state: 'inactive', timer: 0, triggered: false }
+  ];
+}
+initBossLasers();
+
 // === STATE ===
 let state='menu',attempts=1,camX=0,progress=0,lastT=0;
 let gravFlip=1,speedMult=1,gameMode='cube',timeWarpTimer=0;
 let usedOrbs=new Set(),usedPortals=new Set(),usedPads=new Set(),coins=new Set();
 let trail=[],bgStars=[],bgNeb=[];
+let deathCause = null;
+let bossCinematic = { state: 'inactive', timer: 0, widescreenPercent: 0 };
+let bossCam = { zoom: 1.0, yOffset: 0 };
+let bossSpeech = "";
+let bossSpeechT = 0;
+let bossSpeakIdx = -1;
+let bossGlitch = 0;
+let bossChargeParts = [];
+
+// === INTRO CINEMATIC STATE ===
+let introCinematicTimer = 0;
+let introCinematicDuration = 5.8;
+let introWidescreenPercent = 0;
+let introCam = { zoom: 1.0, yOffset: 0, xOffset: 0, tilt: 0 };
+let introCompilingTriggered = false;
+let introLandingTriggered = false;
 
 let spaceSpams = 0;
 let currentRoast = "Aucun mort détecté... pour l'instant ! 😈";
@@ -319,18 +360,77 @@ const AMB_COLORS = ['#7b4fff','#ff2a6d','#00ff87','#00c9ff','#ffdd00','#ff8800',
 function spAmb(){if(amPool.a.length>50)return;const p=amPool.get();p.x=W()+50;p.y=Math.random()*H();p.vx=-40-Math.random()*80;p.vy=-15+Math.random()*30;p.s=1+Math.random()*4;p.a=0;p.l=3+Math.random()*5;p.c=AMB_COLORS[Math.floor(Math.random()*AMB_COLORS.length)];p.p=Math.random()*6.28;}
 
 // === PLAYER ===
-const P={x:0,y:0,vy:0,w:TILE-6,h:TILE-6,onG:false,rot:0,tRot:0,dead:false,canOrb:false,sq:1,st:1,eyeX:0,eyeY:0,gp:0};
+const P={x:0,y:0,vy:0,w:TILE-6,h:TILE-6,onG:false,rot:0,tRot:0,dead:false,canOrb:false,sq:1,st:1,eyeX:0,eyeY:0,gp:0,sliding:false};
 
 // === INPUT ===
-let inp=false,inpJ=false;
-const dn=()=>{spaceSpams++;inp=true;inpJ=true;if(state==='dead')reset();else if(state==='menu'){state='countdown';cdTimer=0;P.x=100;P.y=groundY()-P.h;camX=0;gravFlip=1;speedMult=1;gameMode='cube';cdParts=[];cdBeats={n3:false,n2:false,n1:false,go:false};startMusic();}else if(state==='win'){state='menu';camX=0;progress=0;}};
-const up=()=>{inp=false;};
-addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){e.preventDefault();dn();}});
-addEventListener('keyup',e=>{if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')up();});
+let inp=false,inpJ=false,inpSlide=false;
+const getEventX=e=>{
+  if(!e)return null;
+  const cx = e.touches&&e.touches.length>0 ? e.touches[0].clientX : (e.changedTouches&&e.changedTouches.length>0 ? e.changedTouches[0].clientX : e.clientX);
+  return (cx - offsetX) / scale;
+};
+const getEventY=e=>{
+  if(!e)return null;
+  const cy = e.touches&&e.touches.length>0 ? e.touches[0].clientY : (e.changedTouches&&e.changedTouches.length>0 ? e.changedTouches[0].clientY : e.clientY);
+  return (cy - offsetY) / scale;
+};
+const getSlideBtnBounds = () => {
+  const w = W(), h = H();
+  return {
+    x: w - 170,
+    y: h - 110,
+    width: 140,
+    height: 80
+  };
+};
+const isInsideSlideBtn = (ex, ey) => {
+  const btn = getSlideBtnBounds();
+  return ex >= btn.x && ex <= btn.x + btn.width && ey >= btn.y && ey <= btn.y + btn.height;
+};
+const dn=e=>{
+  spaceSpams++;
+  if(state==='play'&&gameMode==='cube'){
+    const ex=getEventX(e),ey=getEventY(e);
+    if(ex!==null&&ey!==null&&isInsideSlideBtn(ex,ey)){
+      inpSlide=true;
+      return;
+    }
+  }
+  inp=true;inpJ=true;
+  if(state==='dead')reset();
+  else if(state==='menu'){
+    state='introCinematic';
+    introCinematicTimer=0;
+    introCompilingTriggered=false;
+    introLandingTriggered=false;
+    introWidescreenPercent=0;
+    introCam={zoom:1.0,yOffset:0,xOffset:0,tilt:0};
+    inpSlide=false;inp=false;inpJ=false;
+    P.sliding=false;P.w=TILE-6;P.h=TILE-6;
+    P.x=100;
+    P.y=CEILING_Y - 120;
+    P.vy=0;P.rot=0;P.tRot=0;P.dead=false;P.onG=false;
+    camX=0;gravFlip=1;speedMult=0;
+    gameMode='cube';
+    cdParts=[];
+    cdBeats={n3:false,n2:false,n1:false,go:false};
+    startMusic();
+  }
+  else if(state==='win'){state='menu';camX=0;progress=0;}
+};
+const up=e=>{inp=false;inpSlide=false;};
+addEventListener('keydown',e=>{
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){e.preventDefault();dn();}
+  else if(e.code==='ArrowDown'||e.code==='KeyS'||e.code==='ShiftLeft'||e.code==='ControlLeft'){e.preventDefault();inpSlide=true;}
+});
+addEventListener('keyup',e=>{
+  if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')up();
+  else if(e.code==='ArrowDown'||e.code==='KeyS'||e.code==='ShiftLeft'||e.code==='ControlLeft')inpSlide=false;
+});
 canvas.addEventListener('mousedown',dn);canvas.addEventListener('mouseup',up);
-canvas.addEventListener('touchstart',e=>{e.preventDefault();dn();},{passive:false});
-canvas.addEventListener('touchend',e=>{e.preventDefault();up();},{passive:false});
-canvas.addEventListener('touchcancel',e=>{e.preventDefault();up();},{passive:false});
+canvas.addEventListener('touchstart',e=>{e.preventDefault();dn(e);},{passive:false});
+canvas.addEventListener('touchend',e=>{e.preventDefault();up(e);},{passive:false});
+canvas.addEventListener('touchcancel',e=>{e.preventDefault();up(e);},{passive:false});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 document.addEventListener('gesturestart',e=>e.preventDefault());
 document.addEventListener('gesturechange',e=>e.preventDefault());
@@ -365,7 +465,7 @@ const LD=[
   [142,0,2],[147,1,1],[148,1,1],
 
   // ═══ S4: SKYWARD ═══
-  [155,0,2],[156,0,2],
+  [158,0,2],[159,0,2],
   [160,0,3],                  // PAD
   [163,5,4],                  // ORB row 5 at peak (3 tiles from pad) ✓
   [170,1,1],[171,1,1],[172,1,1],[172,2,9],
@@ -468,7 +568,7 @@ function buildObs(){
   obs.push({t: 1, x: 122*TILE, y: GY+TILE, w: TILE, h: TILE, col: 122, row: 1, troll: 'wall_up', trigDist: 115, val: 0, triggered: false});
   
   // Fake Spike Troll (shrinks into ground)
-  obs.push({t: 2, x: 150*TILE, y: GY-TILE, w: TILE, h: TILE, col: 150, row: 0, cl: false, troll: 'fake_spike', trigDist: 65, val: 0, triggered: false});
+  obs.push({t: 2, x: 150*TILE, y: GY-TILE, w: TILE, h: TILE, col: 150, row: 0, cl: false, troll: 'fake_spike', trigDist: 85, val: 0, triggered: false});
   
   // Moving Pad Troll
   obs.push({t: 3, x: 407*TILE, y: GY-TILE, w: TILE, h: TILE, col: 407, row: 0, troll: 'moving_pad', trigDist: 110, val: 0, triggered: false, startX: 407*TILE});
@@ -510,14 +610,25 @@ function isOverPit(x){
 
 // === RESET ===
 function reset(){
-  P.x=100;P.y=groundY()-P.h;P.vy=0;P.onG=false;P.rot=0;P.tRot=0;P.dead=false;P.canOrb=false;P.sq=1;P.st=1;
+  inp=false;inpJ=false;inpSlide=false;
+  P.x=100;P.sliding=false;P.w=TILE-6;P.h=TILE-6;P.y=groundY()-P.h;P.vy=0;P.onG=false;P.rot=0;P.tRot=0;P.dead=false;P.canOrb=false;P.sq=1;P.st=1;
   camX=0;progress=0;gravFlip=1;gravAnim=0;speedMult=1;gameMode='cube';timeWarpTimer=0;
   usedOrbs.clear();usedPortals.clear();usedPads.clear();coins.clear();
   dPool.clear();fxPool.clear();trail=[];gWaves=[];timeEchoes=[];screenShockwaves=[];
   shake.i=0;flashA=0;curSec=-1;secA=0;wasOG=false;catShow=0;catTriggered=false;followCount=0;
   initTrolls();
+  initBossLasers();
+  deathCause = null;
+  bossCinematic = { state: 'inactive', timer: 0, widescreenPercent: 0 };
+  bossCam = { zoom: 1.0, yOffset: 0 };
+  bossSpeech = "";
+  bossSpeechT = 0;
+  bossSpeakIdx = -1;
+  bossGlitch = 0;
+  bossChargeParts = [];
   buildObs();
   state='play';attempts++;
+  startMusic();
 }
 
 function aabb(ax,ay,aw,ah,bx,by,bw,bh){return ax<bx+bw&&ax+aw>bx&&ay<by+bh&&ay+ah>by;}
@@ -583,6 +694,137 @@ function drawStar5(cx5,cy5,r5,rot5){ctx.beginPath();for(let i=0;i<5;i++){const a
 // === UPDATE ===
 function update(dt){
   if(state==='win'){gTime+=dt;winT+=dt;if(Math.random()<dt*3)spFW(Math.random()*W(),Math.random()*H()*.6);updPart(dt);return;}
+  
+  if(state==='introCinematic'){
+    gTime+=dt;
+    introCinematicTimer+=dt;
+    
+    // Update cdParts (used for compiling sparks and binary suction)
+    for(let i=cdParts.length-1;i>=0;i--){
+      const p=cdParts[i];
+      p.x+=p.vx*dt;
+      p.y+=p.vy*dt;
+      p.vy+=p.grav*dt;
+      p.l-=dt;
+      p.a=Math.max(0,Math.min(1,p.l*2));
+      p.rot+=p.vr*dt;
+      p.vx*=.99;
+      if(p.l<=0)cdParts.splice(i,1);
+    }
+    
+    const t = introCinematicTimer;
+    
+    // Smooth cinematic black bars sliding in and out
+    if (t < introCinematicDuration - 0.6) {
+      introWidescreenPercent += (1.0 - introWidescreenPercent) * 6 * dt;
+    } else {
+      introWidescreenPercent += (0.0 - introWidescreenPercent) * 7 * dt;
+    }
+    
+    // Widescreen alert sound effect or music volume dampening
+    if (bgMusic) {
+      if (t < 4.4) {
+        bgMusic.volume = 0.12; // muffled movie-intro style
+      } else {
+        bgMusic.volume += (0.5 - bgMusic.volume) * 3.5 * dt; // punch back to full volume!
+      }
+    }
+    
+    // Camera transitions timeline
+    if (t < 1.0) {
+      // Phase 1: Low grid sweep zoom & tilt
+      introCam.zoom = 1.0 + t * 0.40;
+      introCam.tilt = Math.sin(t * Math.PI) * 0.05;
+      introCam.yOffset = -40 * t;
+      introCam.xOffset = 180 * t;
+    } else if (t < 2.8) {
+      // Phase 2: Diagonal diagnostics pan
+      const p = (t - 1.0) / 1.8;
+      introCam.zoom = 1.40 - p * 0.25;
+      introCam.tilt = 0.05 * (1 - p);
+      introCam.yOffset = -40 + 15 * p;
+      introCam.xOffset = 180 - 120 * p;
+    } else if (t < 4.4) {
+      // Phase 3: Player compilation in the sky and acceleration drop
+      const p = (t - 2.8) / 1.6;
+      introCam.zoom = 1.15 + Math.sin(p * Math.PI) * 0.15;
+      introCam.tilt = Math.sin(p * Math.PI * 2) * 0.015;
+      introCam.yOffset = 0;
+      introCam.xOffset = 0;
+      
+      // Animate player y position (floating in sky, then dropping)
+      if (t < 4.0) {
+        // Floating compilation
+        P.y = CEILING_Y + 40 + Math.sin(gTime * 5) * 6;
+      } else {
+        // Accelerating fall down to ground
+        const fallPct = (t - 4.0) / 0.4;
+        const targetY = groundY() - P.h;
+        P.y = (CEILING_Y + 40) + (fallPct * fallPct) * (targetY - (CEILING_Y + 40));
+        P.rot += dt * 380; // spin quickly during fall!
+      }
+    } else if (t < 5.2) {
+      // Phase 4: Landing shockwave slam!
+      if (!introLandingTriggered) {
+        introLandingTriggered = true;
+        tShake(38);
+        tFlash('#ffffff', 0.65);
+        const landX = P.x - camX + P.w/2;
+        addScreenShockwave(landX, groundY() - 21, '#00ffff');
+        addScreenShockwave(landX, groundY() - 21, '#ff0055');
+        // Spawn massive explosion landing sparkles
+        for (let i = 0; i < 45; i++) {
+          const a = Math.random() * 6.28;
+          const sp = 160 + Math.random() * 380;
+          const fx = fxPool.get();
+          fx.x = landX;
+          fx.y = groundY() - 21;
+          fx.vx = Math.cos(a) * sp;
+          fx.vy = Math.sin(a) * sp - 60;
+          fx.s = 2.0 + Math.random() * 4.5;
+          fx.a = 1.0;
+          fx.l = 0.5 + Math.random() * 0.6;
+          fx.c = Math.random() < 0.5 ? '#ff0055' : '#00ffff';
+        }
+      }
+      
+      // Make P perfectly flat on ground
+      P.y = groundY() - P.h;
+      P.rot = 0; P.tRot = 0;
+      
+      const p = (t - 4.4) / 0.8;
+      introCam.zoom = 1.30 - p * 0.30;
+      introCam.yOffset = 0;
+      introCam.xOffset = 0;
+    } else {
+      // Phase 5: Smooth snap back to standard gameplay camera
+      introCam.zoom = 1.0;
+      introCam.yOffset = 0;
+      introCam.xOffset = 0;
+    }
+    
+    // Handoff to main gameplay countdown directly at '3'
+    if (t >= introCinematicDuration) {
+      state = 'countdown';
+      cdTimer = 0.8; // Skip the "NEON RUSH" reveal since we just did an epic one!
+      cdParts = [];
+      cdBeats = {n3:false,n2:false,n1:false,go:false};
+      introWidescreenPercent = 0;
+      introCam = { zoom: 1.0, yOffset: 0, xOffset: 0, tilt: 0 };
+      
+      // Reset player position for standard start
+      P.x = 100;
+      P.y = groundY() - P.h;
+      P.vy = 0;
+      P.rot = 0;
+      P.tRot = 0;
+      camX = 0;
+    }
+    
+    updPart(dt);
+    return;
+  }
+
   if(state==='countdown'){gTime+=dt;cdTimer+=dt;
     for(let i=cdParts.length-1;i>=0;i--){const p=cdParts[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=p.grav*dt;p.l-=dt;p.a=Math.max(0,Math.min(1,p.l*2));p.rot+=p.vr*dt;p.vx*=.99;if(p.l<=0)cdParts.splice(i,1);}
     if(cdParts.length>600)cdParts.splice(0,cdParts.length-600);
@@ -590,7 +832,7 @@ function update(dt){
     if(cdTimer>=1.5&&!cdBeats.n2){cdBeats.n2=true;tShake(28);tFlash('#00c9ff',.35);spCDBurst(W()/2,H()/2,100,['#00c9ff','#0088ff','#fff','#44ddff'],220,650,1.2);spCDRing(W()/2,H()/2,30,10,'#00c9ff',0.8);spCDSpiral(W()/2,H()/2,25,'#00c9ff',0.9);}
     if(cdTimer>=2.1&&!cdBeats.n1){cdBeats.n1=true;tShake(32);tFlash('#ffd700',.4);spCDBurst(W()/2,H()/2,120,['#ffd700','#ff8800','#fff','#ffee88'],250,700,1.3);spCDRing(W()/2,H()/2,36,10,'#ffd700',0.9);spCDSpiral(W()/2,H()/2,30,'#ffd700',1.0);}
     if(cdTimer>=2.5&&!cdBeats.go){cdBeats.go=true;tShake(40);tFlash('#00ff87',.55);spCDBurst(W()/2,H()/2,180,['#00ff87','#00c9ff','#ffd700','#ff2a6d','#fff','#7b4fff'],300,900,1.5);spCDRing(W()/2,H()/2,48,15,'#fff',1.0);spCDRing(W()/2,H()/2,36,60,'#00ff87',0.8);spCDSpiral(W()/2,H()/2,40,'#ffd700',1.1);for(let i=0;i<4;i++)addScreenShockwave(W()/2,H()/2,['#00ff87','#00c9ff','#ffd700','#ff2a6d'][i]);}
-    if(cdTimer>=2.8){state='play';attempts=1;tFlash('#fff',.6);curSec=-1;cdParts=[];cdBeats={n3:false,n2:false,n1:false,go:false};}
+    if(cdTimer>=2.8){state='play';speedMult=1;attempts=1;tFlash('#fff',.6);curSec=-1;cdParts=[];cdBeats={n3:false,n2:false,n1:false,go:false};}
     updPart(dt);return;}
   if(state!=='play'){gTime+=dt;updPart(dt);return;}
   if(dt>.04)dt=.04;
@@ -638,6 +880,98 @@ function update(dt){
     }
   }
 
+  // === CYBER-CAT BOSS CINEMATIC ENTRANCE SYSTEM ===
+  if (P.x >= 442 * TILE && bossCinematic.state === 'inactive') {
+    bossCinematic.state = 'intro';
+    bossCinematic.timer = 0;
+    bossCinematic.widescreenPercent = 0;
+    tFlash('#00ffff', 0.45);
+    tShake(18);
+  }
+
+  let inCinematic = (bossCinematic.state !== 'inactive' && bossCinematic.state !== 'complete');
+  if (inCinematic) {
+    bossCinematic.timer += dt;
+    
+    // Smooth cinematic black widescreen bars sliding in
+    if (bossCinematic.timer < 3.4) {
+      bossCinematic.widescreenPercent += (1.0 - bossCinematic.widescreenPercent) * 7.5 * dt;
+    } else {
+      bossCinematic.widescreenPercent += (0.0 - bossCinematic.widescreenPercent) * 7 * dt;
+    }
+    
+    // Handle Cinematic Substates
+    if (bossCinematic.timer < 0.8) {
+      bossCinematic.state = 'intro';
+      speedMult = 0.02;
+      bossCam.zoom += (1.35 - bossCam.zoom) * 5 * dt;
+      bossCam.yOffset += (0 - bossCam.yOffset) * 5 * dt;
+      if (bgMusic) bgMusic.volume = Math.max(0.08, 0.5 * (1.0 - bossCinematic.timer / 0.8));
+      if (Math.random() < 0.12) tShake(3);
+    } else if (bossCinematic.timer >= 0.8 && bossCinematic.timer < 2.4) {
+      bossCinematic.state = 'drawing';
+      speedMult = 0.0;
+      bossCam.zoom += (1.15 - bossCam.zoom) * 4 * dt;
+      bossCam.yOffset += (-85 - bossCam.yOffset) * 4 * dt;
+      if (bgMusic) bgMusic.volume = 0.08;
+      if (Math.random() < 0.22) tShake(5);
+    } else if (bossCinematic.timer >= 2.4 && bossCinematic.timer < 3.4) {
+      if (bossCinematic.state !== 'roar') {
+        bossCinematic.state = 'roar';
+        tFlash('#ff0066', 0.65);
+        tShake(42);
+        if (bgMusic) bgMusic.volume = 0.75; // epic volume boost on roar!
+        addScreenShockwave(W()/2, H()*0.35, '#ff0055');
+        addScreenShockwave(W()/2, H()*0.35, '#00ffff');
+        // Spawn massive roar spark bursts
+        for (let i = 0; i < 45; i++) {
+          const angle = Math.random() * 6.28;
+          const sp = 200 + Math.random() * 450;
+          const fx = fxPool.get();
+          fx.x = W()/2;
+          fx.y = H()*0.35;
+          fx.vx = Math.cos(angle) * sp;
+          fx.vy = Math.sin(angle) * sp;
+          fx.s = 2.5 + Math.random() * 4;
+          fx.a = 1.0;
+          fx.l = 0.6 + Math.random() * 0.4;
+          fx.c = Math.random() < 0.5 ? '#ff0055' : '#00ffff';
+        }
+      }
+      speedMult = 0.0;
+      bossCam.zoom += (1.45 - bossCam.zoom) * 8 * dt;
+      bossCam.yOffset += (-85 - bossCam.yOffset) * 8 * dt;
+    } else {
+      // Cinematic is over, bars retracting, camera and music returning to normal
+      speedMult += (1.0 - speedMult) * 5 * dt;
+      bossCam.zoom += (1.0 - bossCam.zoom) * 6 * dt;
+      bossCam.yOffset += (0 - bossCam.yOffset) * 6 * dt;
+      if (bgMusic) bgMusic.volume += (0.5 - bgMusic.volume) * 4 * dt;
+      
+      if (bossCinematic.widescreenPercent <= 0.01) {
+        bossCinematic.state = 'complete';
+        bossCinematic.widescreenPercent = 0;
+        bossCam.zoom = 1.0;
+        bossCam.yOffset = 0;
+        speedMult = 1.0;
+        if (bgMusic) bgMusic.volume = 0.5;
+      }
+    }
+
+    // Freeze player input and lock coordinates safely
+    inp = false;
+    inpJ = false;
+    inpSlide = false;
+    P.sliding = false;
+    P.h = TILE - 6;
+    P.vy = 0;
+    P.onG = true;
+    P.y = groundY() - P.h;
+    P.x = 442 * TILE;
+    P.rot = 0;
+    P.tRot = 0;
+  }
+
   gTime+=dt;beatP=Math.sin(gTime*8)*.5+.5;
   const GY=groundY(),SPD=BASE_SPEED*speedMult;
 
@@ -664,6 +998,22 @@ function update(dt){
   }
 
   if(gameMode==='cube'){
+    if(inpSlide) {
+      if(!P.sliding && P.onG) {
+        if(gravFlip === 1) P.y = GY - 16;
+        else P.y = CEILING_Y;
+      }
+      P.sliding=true;
+      P.h=16;
+      P.rot=0; P.tRot=0; // Reset rotation so the block is perfectly flat when sliding!
+    } else {
+      if(P.sliding && P.onG) {
+        if(gravFlip === 1) P.y = GY - (TILE-6);
+        else P.y = CEILING_Y;
+      }
+      P.sliding=false;
+      P.h=TILE-6; // 42
+    }
     P.vy+=GRAVITY*gravFlip*dt;
     P.y+=P.vy*dt;
     P.onG=false;
@@ -710,12 +1060,12 @@ function update(dt){
       } else if(o.troll === 'moving_pad') {
         o.x = o.startX + Math.sin(o.val * 5) * TILE * 1.5; // Moves left and right
       } else if(o.troll === 'falling_ceil_spike') {
-        o.y = Math.min(GY - TILE, CEILING_Y + o.val * 1800);
-        if(o.y === GY - TILE && !o.didCrash) {
+        o.y = Math.min(GY - TILE - 20, CEILING_Y + o.val * 1800);
+        if(o.y === GY - TILE - 20 && !o.didCrash) {
           o.didCrash = true;
-          tShake(15);
-          tFlash('rgba(255,68,0,0.22)', 0.22);
-          spFX(o.x - camX + TILE/2, GY, ['#ff2a6d', '#ff5500', '#fff'], 18, 60, 220, 0.45);
+          tShake(16);
+          tFlash('rgba(255,100,0,0.25)', 0.25);
+          spFX(o.x - camX + TILE/2, GY, ['#ff2a6d', '#ff7700', '#fff'], 22, 70, 250, 0.5);
         } else if(!o.didCrash) {
           const sox = o.x - camX;
           if(sox > -TILE && sox < W() + TILE && Math.random() < dt * 35) {
@@ -786,10 +1136,16 @@ function update(dt){
       }
     }else if(o.t===2){
       if(o.following)continue;
-      let hx,hy,hw,hh;
-      if(o.cl){hx=o.x+12;hy=o.y;hw=o.w-24;hh=o.h*.6;}
-      else{hx=o.x+12;hy=o.y+TILE*.4;hw=o.w-24;hh=o.h*.6;}
-      if(aabb(P.x+6,P.y+6,P.w-12,P.h-12,hx,hy,hw,hh)){die();return;}
+      if(o.troll === 'fake_spike')continue;
+      if(o.troll === 'falling_ceil_spike') {
+        let hx = o.x + 8, hy = o.y, hw = o.w - 16, hh = o.h * 0.85;
+        if(aabb(P.x + 2, P.y + 2, P.w - 4, P.h - 4, hx, hy, hw, hh)) { die(); return; }
+      } else {
+        let hx,hy,hw,hh;
+        if(o.cl){hx=o.x+12;hy=o.y;hw=o.w-24;hh=o.h*.6;}
+        else{hx=o.x+12;hy=o.y+TILE*.4;hw=o.w-24;hh=o.h*.6;}
+        if(aabb(P.x+6,P.y+6,P.w-12,P.h-12,hx,hy,hw,hh)){die();return;}
+      }
     }else if(o.t===3){
       const pid=o.col+'p';
       if(!usedPads.has(pid)&&aabb(P.x,P.y,P.w,P.h,o.x,o.y,o.w,o.h)){
@@ -849,7 +1205,7 @@ function update(dt){
   }
 
   // Jump (cube mode only)
-  if(gameMode==='cube'&&inp&&P.onG){
+  if(gameMode==='cube'&&inp&&P.onG&&!P.sliding){
     P.vy=JUMP_VEL*gravFlip;P.onG=false;P.tRot+=90;P.sq=1.3;P.st=.7;
     const sx=P.x-camX,jy=gravFlip===1?P.y+P.h:P.y;spJump(sx,jy);addGW(sx+P.w/2);
     addScreenShockwave(sx,jy,C.c1);
@@ -875,12 +1231,26 @@ function update(dt){
     trail=trail.filter(g=>g.a>0);
   }
 
-  // Walking ground particles — dual color + star bursts
+  // Walking ground particles — dual color + star bursts / friction sparks if sliding
   if(gameMode==='cube'&&P.onG){
     const sx=P.x-camX,gy2=gravFlip===1?P.y+P.h:P.y;
-    if(Math.random()<.8){const p=fxPool.get();p.x=sx+Math.random()*10-5;p.y=gy2;p.vx=-50-Math.random()*80;p.vy=gravFlip*(-(25+Math.random()*60));p.s=1.5+Math.random()*3.5;p.a=.9;p.l=.7+Math.random()*.3;p.c=Math.random()<.5?C.cg:C.c2;}
-    if(Math.random()<.3){const p=fxPool.get();p.x=sx+Math.random()*6-3;p.y=gy2;p.vx=-30-Math.random()*50;p.vy=gravFlip*(-(40+Math.random()*80));p.s=1+Math.random()*2;p.a=1;p.l=.5;p.c='#fff';}
-    if(Math.random()<.08){spFX(sx,gy2,['#fff',C.c1,C.c2,'#ffdd00'],6,40,120,.35);}
+    if(P.sliding) {
+      if(Math.random()<0.95){
+        const p=fxPool.get();
+        p.x=sx+Math.random()*P.w-P.w/2;
+        p.y=gy2;
+        p.vx=-140-Math.random()*200;
+        p.vy=gravFlip*(-(25+Math.random()*70));
+        p.s=1.5+Math.random()*3.8;
+        p.a=1.0;
+        p.l=0.35+Math.random()*0.3;
+        p.c=['#ffaa00','#ff2a6d','#ffffff'][Math.floor(Math.random()*3)];
+      }
+    } else {
+      if(Math.random()<.8){const p=fxPool.get();p.x=sx+Math.random()*10-5;p.y=gy2;p.vx=-50-Math.random()*80;p.vy=gravFlip*(-(25+Math.random()*60));p.s=1.5+Math.random()*3.5;p.a=.9;p.l=.7+Math.random()*.3;p.c=Math.random()<.5?C.cg:C.c2;}
+      if(Math.random()<.3){const p=fxPool.get();p.x=sx+Math.random()*6-3;p.y=gy2;p.vx=-30-Math.random()*50;p.vy=gravFlip*(-(40+Math.random()*80));p.s=1+Math.random()*2;p.a=1;p.l=.5;p.c='#fff';}
+      if(Math.random()<.08){spFX(sx,gy2,['#fff',C.c1,C.c2,'#ffdd00'],6,40,120,.35);}
+    }
   }
   // Wave mode trail sparkles
   if(gameMode==='wave'&&Math.random()<.6){const p=fxPool.get();p.x=P.x-camX-P.w/2+Math.random()*4;p.y=P.y+P.h/2+(Math.random()-.5)*P.h;p.vx=-80-Math.random()*120;p.vy=(Math.random()-.5)*60;p.s=1+Math.random()*2.5;p.a=1;p.l=.4+Math.random()*.2;p.c=Math.random()<.5?C.wave1:'#fff';}
@@ -914,6 +1284,62 @@ function update(dt){
     }
   }
 
+  // === CYBER-CAT BOSS LASERS PHYSICS & COLLISIONS ===
+  for (const laser of bossLasers) {
+    const laserX = laser.col * TILE;
+    if (!laser.triggered && P.x > laserX - 360 && P.x < laserX + 100) {
+      laser.triggered = true;
+      laser.state = 'warning';
+      laser.timer = 0;
+    }
+    
+    if (laser.state === 'warning') {
+      laser.timer += dt;
+      if (laser.timer >= 0.7) {
+        laser.state = 'active';
+        laser.timer = 0;
+        tShake(12);
+        tFlash('rgba(255, 0, 85, 0.15)', 0.15);
+      }
+    } else if (laser.state === 'active') {
+      laser.timer += dt;
+      if (laser.timer >= 0.45) {
+        laser.state = 'fired';
+      } else {
+        const midX = laserX + TILE/2;
+        if (P.x + P.w > midX - 14 && P.x < midX + 14) {
+          if (laser.type === 'high') {
+            if (!P.sliding) {
+              deathCause = 'high_laser';
+              die();
+              return;
+            }
+          } else if (laser.type === 'low') {
+            if (P.y + P.h > GY - 32) {
+              deathCause = 'low_laser';
+              die();
+              return;
+            }
+          }
+        }
+        
+        if (Math.random() < dt * 45) {
+          const px = midX - camX + (Math.random() - 0.5) * 20;
+          const py = (laser.type === 'high') ? (GY - 36 + Math.random() * 20) : (GY - Math.random() * 20);
+          const p = fxPool.get();
+          p.x = px;
+          p.y = py;
+          p.vx = (Math.random() - 0.5) * 160;
+          p.vy = -Math.random() * 180;
+          p.s = 2 + Math.random() * 3;
+          p.a = 1.0;
+          p.l = 0.35 + Math.random() * 0.25;
+          p.c = ['#ffffff', '#ff0055', '#ff55aa'][Math.floor(Math.random() * 3)];
+        }
+      }
+    }
+  }
+
   if(Math.random()<dt*12)spAmb();
   updPart(dt);
 
@@ -923,7 +1349,7 @@ function update(dt){
   if(flashA>0)flashA-=dt*4;
 
   progress=Math.min(P.x/levelEnd,1);
-  if(P.x>=levelEnd){state='win';winT=0;tFlash('#ffd700',.5);}
+  if(P.x>=levelEnd){state='win';winT=0;tFlash('#ffd700',.5); if(bgMusic) bgMusic.pause();}
 }
 
 function updPart(dt){
@@ -936,6 +1362,12 @@ function updPart(dt){
 function die(){
   state='dead';
   P.dead=true;
+  if(bgMusic) bgMusic.pause();
+  if(deathMusic) {
+    deathMusic.currentTime = 0;
+    const p = deathMusic.play();
+    if(p && p.catch) p.catch(()=>{});
+  }
   spDeath(P.x-camX+P.w/2,P.y+P.h/2);
   tShake(20);
   tFlash(C.spike,.6);
@@ -948,11 +1380,30 @@ function die(){
   
   let roastsList = [];
   
-  if (progress < 0.04) {
+  if (deathCause === 'high_laser') {
+    roastsList = [
+      "Le laser supérieur du Cyber-Cat t'a décapité ! Il fallait glisser sous le faisceau ! 😾",
+      "Astuce : Quand le Cyber-Cat tire au niveau des yeux, baisse-toi ! (Touche BAS / Glisser) 📉",
+      "Tu as refusé de te prosterner devant la suprématie féline ? Boum, décapité par le laser ! 👑"
+    ];
+  } else if (deathCause === 'low_laser') {
+    roastsList = [
+      "Sauté trop tard ou pas du tout ! Le laser au sol t'a transformé en toast pour chat. 🍞",
+      "Esquive de laser : Zéro. Le Cyber-Cat adore voir les cubes griller sur place ! 🔥",
+      "Tu es resté les pieds sur terre... et paf, le laser de sol t'a pulvérisé ! ⚡"
+    ];
+  } else if (progress < 0.04) {
     roastsList = [
       "Tu es sérieux ? Mort au tout premier pic... 🤦",
       "Même le tutoriel est trop dur pour toi ? 👶",
       "Il n'y avait QU'UN SEUL pic ! Comment c'est possible ? 😭"
+    ];
+  } else if (pCol >= 442) {
+    roastsList = [
+      "Le Cyber-Cat a jugé que tes mouvements manquaient de rythme. 🐱",
+      "Face à l'hologramme légendaire du Cyber-Cat, ton cube a fondu sous la pression ! 🙀",
+      "Le boss final a rigolé si fort que son rire a provoqué un court-circuit dans ton cube. ⚡",
+      `Mourir à ${~~(progress*100)}% face au boss final... Le seum est intergalactique ! 🌌`
     ];
   } else if (progress >= 0.92) {
     roastsList = [
@@ -966,11 +1417,14 @@ function die(){
       "Il fallait sauter en rythme sur le pont ! Trop lent ! 🐢",
       "C'est un pont fantôme, pas un tapis rouge de star. 💀"
     ];
-  } else if (pCol >= 186 && pCol <= 192) {
+  } else if (pCol >= 186 && pCol <= 194) {
     roastsList = [
-      "Attention à la tête ! Le pic du plafond t'a écrasé comme une crêpe. 🥞",
-      "Tu n'as pas vu le gros pic te tomber dessus ? Il pesait pourtant 3 tonnes. 🏗️",
-      "Esquive de stalactite : Note globale : 0/20. ❌"
+      "Attention à la tête ! Le pic du plafond t'a écrasé comme une crêpe. Appuie sur BAS pour glisser ! 🥞",
+      "Tu n'as pas vu le gros pic te tomber dessus ? La glissade n'est pas optionnelle ici ! 🏗️",
+      "Esquive de stalactite : Note globale : 0/20. Rappel : BAS pour glisser, HAUT pour sauter. Pas l'inverse ! ❌",
+      "Tu as relâché la glissade trop tôt et tu t'es fait décapiter par le pic ! Timing catastrophique. 🩸",
+      "Magnifique glissade sous le pic ! Dommage que tu aies oublié de SAUTER immédiatement après... 🤡",
+      "Es-tu un lapin pris dans les phares d'une voiture ? Le pic t'a écrasé de plein fouet sans réaction ! 🐇"
     ];
   } else if (pCol >= 412 && pCol <= 417) {
     roastsList = [
@@ -1313,6 +1767,36 @@ function drawObs(){
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 1.5;
           ctx.stroke();
+        } else if(o.troll === 'fake_spike') {
+          ctx.save();
+          const pulse = 10 + Math.sin(t * 12) * 4;
+          ctx.shadowColor = '#00c9ff';
+          ctx.shadowBlur = pulse;
+          const sg = ctx.createLinearGradient(ox, oy, ox, oy + TILE);
+          sg.addColorStop(0, 'rgba(0, 201, 255, 0.45)');
+          sg.addColorStop(0.5, 'rgba(255, 42, 109, 0.2)');
+          sg.addColorStop(1, 'rgba(0, 201, 255, 0.05)');
+          ctx.fillStyle = sg;
+          ctx.beginPath();
+          ctx.moveTo(ox + TILE/2, oy + 4);
+          ctx.lineTo(ox + TILE - 4, oy + TILE);
+          ctx.lineTo(ox + 4, oy + TILE);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = '#00c9ff';
+          ctx.lineWidth = 1.8;
+          ctx.stroke();
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+          ctx.lineWidth = 1.0;
+          const scanY = oy + TILE * (0.2 + (t * 0.4) % 0.6);
+          ctx.beginPath();
+          ctx.moveTo(ox + 6, scanY);
+          ctx.lineTo(ox + TILE - 6, scanY);
+          ctx.stroke();
+          if (Math.random() < 0.15) {
+            spFX(ox + TILE/2, oy + TILE/2, ['#00c9ff', '#ff2a6d'], 2, 10, 40, 0.3);
+          }
+          ctx.restore();
         } else if(IS_MOBILE){
           ctx.drawImage(getMobSpike(o.cl), ox-15, oy-15);
         }else{
@@ -1687,7 +2171,11 @@ function drawPlayer(){
     ctx.fillStyle='rgba(255,255,255,.25)';ctx.beginPath();ctx.moveTo(P.w*.3,0);ctx.lineTo(-P.w*.15,-P.h*.2);ctx.lineTo(-P.w*.05,0);ctx.lineTo(-P.w*.15,P.h*.2);ctx.closePath();ctx.fill();
   }else{
     // CUBE
-    ctx.rotate(P.rot*Math.PI/180);ctx.scale(P.sq,P.st*gravFlip);
+    if(P.sliding) {
+      ctx.rotate(P.rot*Math.PI/180);ctx.scale(1.35, 1.0 * gravFlip);
+    } else {
+      ctx.rotate(P.rot*Math.PI/180);ctx.scale(P.sq,P.st*gravFlip);
+    }
     
     if(timeWarpTimer > 0) {
       ctx.save();ctx.translate(-3.5, 0);ctx.globalAlpha = 0.45;ctx.fillStyle = '#ff003c';
@@ -1702,10 +2190,10 @@ function drawPlayer(){
     ctx.strokeStyle='rgba(255,255,255,.9)';ctx.lineWidth=2.5;ctx.beginPath();ctx.roundRect(-P.w/2,-P.h/2,P.w,P.h,5);ctx.stroke();
     ctx.strokeStyle=C.c1;ctx.lineWidth=1;ctx.globalAlpha=.3+P.gp*.2;ctx.beginPath();ctx.roundRect(-P.w/2-3,-P.h/2-3,P.w+6,P.h+6,7);ctx.stroke();ctx.globalAlpha=1;
     // Face
-    ctx.fillStyle='rgba(0,0,0,.35)';const is=P.w*.48;ctx.beginPath();ctx.roundRect(-is/2,-is/2,is,is,4);ctx.fill();
+    ctx.fillStyle='rgba(0,0,0,.35)';const isX=P.w*.48,isY=P.h*.48;ctx.beginPath();ctx.roundRect(-isX/2,-isY/2,isX,isY,P.sliding?2:4);ctx.fill();
     ctx.fillStyle='#fff';const ew=P.w*.32,eh=P.h*.28;ctx.beginPath();ctx.roundRect(-ew/2+P.eyeX*.5,-eh/2+P.eyeY*.3,ew,eh,eh/2);ctx.fill();
     ctx.fillStyle='#111';const pw=ew*.45,ph=eh*.55;ctx.beginPath();ctx.roundRect(-pw/2+P.eyeX*1.2,-ph/2+P.eyeY*.6,pw,ph,ph/2);ctx.fill();
-    ctx.fillStyle='rgba(255,255,255,.8)';ctx.beginPath();ctx.arc(-pw*.2+P.eyeX*.8,-ph*.3+P.eyeY*.3,2,0,6.28);ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,.8)';ctx.beginPath();ctx.arc(-pw*.2+P.eyeX*.8,-ph*.3+P.eyeY*.3,P.sliding?0.7:2,0,6.28);ctx.fill();
     // Corner sparkle
     const cSpark=.4+Math.sin(gTime*10)*.4;
     ctx.fillStyle=`rgba(255,255,255,${cSpark})`;ctx.beginPath();ctx.arc(-P.w/2+3,-P.h/2+3,2,0,6.28);ctx.fill();
@@ -1761,6 +2249,53 @@ function drawHUD(){
   // Mode indicator
   if(gameMode==='wave'){ctx.fillStyle=C.wave1;ctx.globalAlpha=.6+Math.sin(gTime*4)*.3;ctx.font='bold 12px sans-serif';ctx.fillText('〰 WAVE',14,70);ctx.globalAlpha=1;}
   if(speedMult!==1){ctx.fillStyle=speedMult<1?C.speedSlow:C.speedFast;ctx.globalAlpha=.6;ctx.font='bold 12px sans-serif';ctx.fillText(speedMult<1?'◀◀ SLOW':'▶▶ FAST',14,gameMode==='wave'?84:70);ctx.globalAlpha=1;}
+
+  // Virtual Slide Button for Mobile & Desktop visual consistency
+  if(state==='play'&&gameMode==='cube'){
+    const btn = getSlideBtnBounds();
+    ctx.save();
+    
+    // Glassmorphism body
+    ctx.fillStyle = 'rgba(15, 5, 30, 0.7)';
+    ctx.beginPath();
+    ctx.roundRect(btn.x, btn.y, btn.width, btn.height, 14);
+    ctx.fill();
+    
+    // Glowing neon border
+    const pulse = 10 + Math.sin(gTime * 8) * 4;
+    ctx.strokeStyle = inpSlide ? '#00ff87' : '#ff2a6d';
+    ctx.shadowColor = inpSlide ? '#00ff87' : '#ff2a6d';
+    ctx.shadowBlur = pulse;
+    ctx.lineWidth = inpSlide ? 3.0 : 2.0;
+    ctx.beginPath();
+    ctx.roundRect(btn.x, btn.y, btn.width, btn.height, 14);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    
+    // Inner cyan line
+    ctx.strokeStyle = inpSlide ? 'rgba(255,255,255,0.7)' : 'rgba(0, 246, 255, 0.35)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.roundRect(btn.x + 5, btn.y + 5, btn.width - 10, btn.height - 10, 10);
+    ctx.stroke();
+    
+    // Text and Icon
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    // Arrow Down Icon
+    const arrowBounce = inpSlide ? 0 : Math.sin(gTime * 12) * 3;
+    ctx.fillStyle = inpSlide ? '#00ff87' : '#00f6ff';
+    ctx.font = 'bold 24px "Segoe UI", sans-serif';
+    ctx.fillText('⬇', btn.x + btn.width / 2, btn.y + 26 + arrowBounce);
+    
+    // Text GLISSER
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '800 12px "Segoe UI", sans-serif';
+    ctx.fillText('GLISSER', btn.x + btn.width / 2, btn.y + 56);
+    
+    ctx.restore();
+  }
 }
 
 function drawFlash(){if(flashA>0){ctx.globalAlpha=Math.min(flashA,1);ctx.fillStyle=flashC;ctx.fillRect(0,0,W(),H());ctx.globalAlpha=1;}}
@@ -2357,8 +2892,248 @@ function drawMenu(){
   ctx.restore();
 }
 
+function drawCDParts() {
+  const m = IS_MOBILE;
+  for (const p of cdParts) {
+    ctx.save();
+    ctx.globalAlpha = p.a;
+    ctx.fillStyle = p.c;
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot * Math.PI / 180);
+    
+    if (p.sh === 0) {
+      ctx.fillRect(-p.s/2, -p.s/2, p.s, p.s);
+    } else if (p.sh === 1) {
+      ctx.beginPath(); ctx.arc(0, 0, p.s/2, 0, 6.28); ctx.fill();
+    } else if (p.sh === 2) {
+      ctx.beginPath();
+      ctx.moveTo(0, -p.s/2);
+      ctx.lineTo(p.s/2, p.s/2);
+      ctx.lineTo(-p.s/2, p.s/2);
+      ctx.closePath();
+      ctx.fill();
+    } else if (p.sh === 3) {
+      ctx.font = `bold ${p.s * 1.5}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      if (!m) {
+        ctx.shadowColor = p.c;
+        ctx.shadowBlur = 8;
+      }
+      ctx.fillText(p.char || '0', 0, 0);
+    }
+    ctx.restore();
+  }
+}
+
+function drawIntroCinematicUI() {
+  const w = W(), h = H(), gy = groundY();
+  const t = introCinematicTimer;
+  
+  // 1. Draw countdown particles (compiling Sparks)
+  drawCDParts();
+  
+  // 2. Draw black widescreen letterbox bars
+  if (introWidescreenPercent > 0) {
+    ctx.save();
+    ctx.fillStyle = '#05020c';
+    const barH = 50 * introWidescreenPercent;
+    
+    // Top bar
+    ctx.fillRect(0, 0, w, barH);
+    ctx.strokeStyle = '#00f6ff';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = '#00f6ff';
+    ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.moveTo(0, barH); ctx.lineTo(w, barH); ctx.stroke();
+    
+    // Bottom bar
+    ctx.fillRect(0, h - barH, w, barH);
+    ctx.strokeStyle = '#ff0055';
+    ctx.shadowColor = '#ff0055';
+    ctx.beginPath(); ctx.moveTo(0, h - barH); ctx.lineTo(w, h - barH); ctx.stroke();
+    
+    // Telemetry label in top bar
+    if (introWidescreenPercent > 0.6) {
+      ctx.fillStyle = Math.floor(gTime * 5) % 2 === 0 ? '#00f6ff' : '#ffffff';
+      ctx.font = '800 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText("🚨 ALERTE SYSTÈME : BOOT DU CORE GRILLE // INTENSITÉ : MAXIMALE 🚨", w/2, barH / 2);
+    }
+    
+    // Telemetry log in bottom bar (typewriter effect based on timer)
+    if (introWidescreenPercent > 0.6) {
+      ctx.fillStyle = '#ff0055';
+      ctx.shadowColor = '#ff0055';
+      ctx.shadowBlur = 6;
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      
+      let logText = "";
+      if (t < 1.2) {
+        logText = "> ENGINE_INIT: CHARGEMENT DES DYNAMICS GRILLE SYNTHWAVE... OK";
+      } else if (t < 2.4) {
+        logText = "> SECURE_BOOT: ANALYSE DES SECTEURS DE VOLATILITÉ... OK";
+      } else if (t < 3.6) {
+        logText = "> MATRIX_PORTAL: COMPILATION ET INJECTION DE L'INTRUS... EN COURS";
+      } else if (t < 4.4) {
+        logText = "> WARNING: MATÉRIALISATION QUANTIQUE IMMINENTE ! PARÉ AU CHOC !";
+      } else {
+        logText = "> COGNITIVE_BOOT_SUCCESS: SYSTEM ENGAGED. COURS POUR TA VIE !!!";
+      }
+      
+      // Typewriter reveal length
+      const charCount = Math.floor((t % 1.2) * 60) + 10;
+      const visibleLog = logText.substring(0, charCount);
+      ctx.fillText(visibleLog, w * 0.12, h - barH / 2);
+    }
+    ctx.restore();
+  }
+  
+  // 3. Compilation effects around the player cube in mid-air
+  if (t >= 2.8 && t < 4.4) {
+    const px = P.x - camX + P.w/2;
+    const py = P.y + P.h/2;
+    const compileProg = Math.min(1.0, (t - 2.8) / 1.2);
+    
+    ctx.save();
+    
+    // Vertical neon compilation sweep laser beam
+    ctx.strokeStyle = Math.floor(gTime * 15) % 2 === 0 ? '#00ff87' : '#00ffff';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = ctx.strokeStyle;
+    ctx.shadowBlur = 15;
+    ctx.beginPath();
+    ctx.moveTo(px, CEILING_Y);
+    ctx.lineTo(px, gy);
+    ctx.stroke();
+    
+    // Scan sweep line passing down
+    const sweepY = CEILING_Y + 40 + Math.sin(gTime * 10) * 45;
+    ctx.strokeStyle = '#00ff87';
+    ctx.lineWidth = 2.0;
+    ctx.beginPath();
+    ctx.moveTo(px - 50, sweepY); ctx.lineTo(px + 50, sweepY);
+    ctx.stroke();
+    
+    // Rotating containment ring
+    ctx.translate(px, py);
+    ctx.strokeStyle = '#00ffff';
+    ctx.lineWidth = 1.2;
+    ctx.rotate(gTime * 3);
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    ctx.arc(0, 0, 36, 0, 6.28);
+    ctx.stroke();
+    ctx.restore();
+    
+    // Compilation progress label
+    ctx.save();
+    ctx.fillStyle = '#00ff87';
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`CUBE_COMPILE: ${~~(compileProg * 100)}%`, px, py - 32);
+    ctx.restore();
+    
+    // Suction binary particles
+    if (Math.random() < 0.3) {
+      const angle = Math.random() * 6.28;
+      const dist = 100 + Math.random() * 80;
+      cdParts.push({
+        x: px + Math.cos(angle) * dist,
+        y: py + Math.sin(angle) * dist,
+        vx: -Math.cos(angle) * 180,
+        vy: -Math.sin(angle) * 180,
+        s: 8 + Math.random() * 4,
+        a: 1.0,
+        l: 0.5,
+        c: Math.random() < 0.5 ? '#00ff87' : '#00ffff',
+        rot: Math.random() * 360,
+        vr: 0,
+        sh: 3,
+        char: Math.random() < 0.5 ? '0' : '1',
+        grav: 0
+      });
+    }
+  }
+  
+  // 4. Monolithic Title Card Reveal (after landing)
+  if (t >= 4.4) {
+    const p = (t - 4.4) / 1.4;
+    const alpha = Math.min(1.0, p * 2);
+    const titleScale = 1.2 - Math.min(0.2, p * 0.2);
+    
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    // Subtitle
+    ctx.fillStyle = '#ff0055';
+    ctx.font = '800 12px "Segoe UI", sans-serif';
+    ctx.shadowColor = '#ff0055';
+    ctx.shadowBlur = 8;
+    ctx.fillText("⚡ ANTIGRAVITY ENGINE PRÉSENTE ⚡", w/2, h/2 - 58);
+    
+    // Main Title: NEON RUSH with split chromatic aberration
+    ctx.save();
+    ctx.scale(titleScale, titleScale);
+    const scaleX = w/2 / titleScale;
+    const scaleY = h/2 / titleScale;
+    
+    // Cyan offset shadow
+    ctx.fillStyle = '#00ffff';
+    ctx.shadowColor = '#00ffff';
+    ctx.shadowBlur = 30;
+    ctx.font = '900 68px "Segoe UI", sans-serif';
+    ctx.fillText("NEON RUSH", scaleX - 3.5, scaleY);
+    
+    // Fuchsia offset shadow
+    ctx.fillStyle = '#ff0055';
+    ctx.shadowColor = '#ff0055';
+    ctx.fillText("NEON RUSH", scaleX + 3.5, scaleY);
+    
+    // Main white gradient core
+    ctx.shadowBlur = 10;
+    const tg = ctx.createLinearGradient(scaleX - 150, scaleY - 20, scaleX + 150, scaleY + 20);
+    tg.addColorStop(0, '#ff0055');
+    tg.addColorStop(0.5, '#ffffff');
+    tg.addColorStop(1, '#00ffff');
+    ctx.fillStyle = tg;
+    ctx.fillText("NEON RUSH", scaleX, scaleY);
+    ctx.restore();
+    
+    // Horizontal separator bars
+    ctx.strokeStyle = '#00ffff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(w/2 - 180 * Math.min(1.0, p * 1.5), h/2 - 76);
+    ctx.lineTo(w/2 + 180 * Math.min(1.0, p * 1.5), h/2 - 76);
+    ctx.stroke();
+    
+    ctx.strokeStyle = '#ff0055';
+    ctx.beginPath();
+    ctx.moveTo(w/2 - 180 * Math.min(1.0, p * 1.5), h/2 + 76);
+    ctx.lineTo(w/2 + 180 * Math.min(1.0, p * 1.5), h/2 + 76);
+    ctx.stroke();
+    
+    // Sub-preview info text
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText("🚨 INITIALISATION DES ALGO: OK // SECTOR 1 IMMINENT 🚨", w/2, h/2 + 48);
+    
+    ctx.restore();
+  }
+}
+
 function drawCD(){
   const w=W(),h=H(),t=cdTimer;
+  
+  // Render countdown particles
+  drawCDParts();
+  
   // Phase 0 (0-0.8): Title card "NEON RUSH" with dramatic reveal
   // Phase 1 (0.8-1.5): 3
   // Phase 2 (1.5-2.1): 2
@@ -2519,6 +3294,874 @@ function drawIntro(){
   }
 }
 
+// === HOLOGRAPHIC SLIDE WARNING ===
+function drawSlideWarning() {
+  if (P.x < 178 * TILE || P.x > 190 * TILE) return;
+
+  const w = W(), h = H();
+  // Pulse animation using gTime
+  const pulse = Math.sin(gTime * 14) * 0.04 + 1.0;
+  
+  ctx.save();
+  ctx.translate(w / 2, h * 0.28);
+  ctx.scale(pulse, pulse);
+  
+  const boxW = 500;
+  const boxH = 95;
+  
+  // Neon glow background box
+  ctx.shadowColor = '#ff2a6d';
+  ctx.shadowBlur = 25;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#ff2a6d';
+  ctx.fillStyle = 'rgba(15, 5, 30, 0.88)';
+  ctx.beginPath();
+  ctx.roundRect(-boxW / 2, -boxH / 2, boxW, boxH, 14);
+  ctx.fill();
+  ctx.stroke();
+  
+  // Grid/scan line effect inside warning box
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(0, 246, 255, 0.12)';
+  ctx.lineWidth = 1.5;
+  const scanY = ((gTime * 60) % (boxH - 12)) - (boxH / 2 - 6);
+  ctx.beginPath();
+  ctx.moveTo(-boxW / 2 + 12, scanY);
+  ctx.lineTo(boxW / 2 - 12, scanY);
+  ctx.stroke();
+  
+  // Inner glowing cyan border
+  ctx.strokeStyle = '#00f6ff';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect(-boxW / 2 + 6, -boxH / 2 + 6, boxW - 12, boxH - 12, 10);
+  ctx.stroke();
+  
+  // Warning typography
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  
+  // Dynamic warning color flash
+  const flashColor = (Math.floor(gTime * 6) % 2 === 0) ? '#ff2a6d' : '#ffdd00';
+  
+  ctx.font = 'bold 22px "Segoe UI", sans-serif';
+  ctx.fillStyle = flashColor;
+  ctx.fillText("⚠️ DANGER ILLUMINÉ : GLISSER ! ⚠️", 0, -18);
+  
+  ctx.font = 'bold 15px "Segoe UI", sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText("⬇️ TOUCHE BAS / BOUTON DE GLISSADE ⬇️", 0, 18);
+  
+  // Flashing retro neon bounce arrow
+  const bounce = Math.abs(Math.sin(gTime * 12)) * 8;
+  ctx.font = 'bold 26px "Segoe UI", sans-serif';
+  ctx.fillStyle = '#00f6ff';
+  ctx.fillText("⬇", 0, 52 + bounce);
+  
+  ctx.restore();
+}
+
+// === CYBER-CAT BOSS RENDERERS ===
+function drawCyberBoss() {
+  if (P.x < 442 * TILE && bossCinematic.state === 'inactive') return;
+  
+  let fade = 0;
+  if (bossCinematic.state !== 'inactive') {
+    fade = Math.min(1.0, bossCinematic.timer / 1.0);
+  } else {
+    fade = Math.min(1.0, Math.max(0.0, (P.x - 442 * TILE) / (4 * TILE)));
+    if (P.x > 514 * TILE) {
+      fade *= Math.max(0, 1 - (P.x - 514 * TILE) / (3 * TILE));
+    }
+  }
+  if (fade <= 0) return;
+
+  const w = W(), h = H(), gy = groundY();
+  ctx.save();
+  ctx.globalAlpha = fade * 0.85;
+
+  const floatY = Math.sin(gTime * 2.0) * 12;
+  const bossX = w / 2;
+  const bossY = h * 0.35 + floatY;
+
+  let glitchX = 0;
+  if (bossCinematic.state === 'roar') {
+    glitchX = (Math.random() - 0.5) * 20;
+  } else if (Math.random() < 0.15) {
+    glitchX = (Math.random() - 0.5) * 12;
+  }
+
+  // Active laser status for expressions and effects
+  let activeLaser = null;
+  for (const laser of bossLasers) {
+    if (laser.state === 'warning' || laser.state === 'active') {
+      activeLaser = laser;
+      break;
+    }
+  }
+
+  // Eye locations
+  const eyeLX = bossX - 40 + glitchX;
+  const eyeLY = bossY - 12;
+  const eyeRX = bossX + 40 + glitchX;
+  const eyeRY = bossY - 12;
+
+  const dt = 1/60; // stable fallback for rendering loop
+
+  // 1. Draw glowing rotating circular wireframe hologram containment field behind the head
+  ctx.save();
+  ctx.translate(bossX, bossY);
+  ctx.globalAlpha = fade * 0.25;
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#00c9ff';
+  ctx.shadowColor = '#00c9ff';
+  ctx.shadowBlur = 12 * beatP;
+  
+  // Concentric circle 1: dashed rotating
+  ctx.save();
+  ctx.rotate(gTime * 0.4);
+  ctx.setLineDash([8, 12]);
+  ctx.beginPath(); ctx.arc(0, 0, 150 + Math.sin(gTime * 3) * 8, 0, 6.28); ctx.stroke();
+  ctx.restore();
+  
+  // Concentric circle 2: magenta gear ticks rotating backward
+  ctx.strokeStyle = '#ff2a6d';
+  ctx.shadowColor = '#ff2a6d';
+  ctx.save();
+  ctx.rotate(-gTime * 0.6);
+  ctx.beginPath(); ctx.arc(0, 0, 115, 0, 6.28); ctx.stroke();
+  for (let i = 0; i < 8; i++) {
+    const angle = (i * 45) * Math.PI / 180;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(angle) * 115, Math.sin(angle) * 115);
+    ctx.lineTo(Math.cos(angle) * 128, Math.sin(angle) * 128);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Floating matrix data rings
+  ctx.strokeStyle = 'rgba(0, 255, 135, 0.4)';
+  ctx.shadowColor = '#00ff87';
+  ctx.save();
+  ctx.rotate(gTime * 0.25);
+  ctx.setLineDash([3, 7]);
+  ctx.beginPath(); ctx.arc(0, 0, 185, 0, 6.28); ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+
+  // 2. Draw holographic wireframe head (with CRT chromatic split slices)
+  const drawHead = (offsetX, color, lineWidth, glow, cpVal) => {
+    const progress = cpVal !== undefined ? cpVal : 1.0;
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    if (glow) {
+      ctx.shadowColor = color;
+      ctx.shadowBlur = glow;
+    }
+    
+    // Slices glitched offsets
+    let s1 = 0, s2 = 0, s3 = 0;
+    if (activeLaser && activeLaser.state === 'active') {
+      s1 = (Math.sin(gTime * 70) * 8);
+      s2 = (Math.sin(gTime * 95) * 12);
+      s3 = (Math.sin(gTime * 60) * 8);
+    } else if (bossCinematic.state === 'roar') {
+      s1 = (Math.sin(gTime * 80) * 12);
+      s2 = (Math.sin(gTime * 110) * 18);
+      s3 = (Math.sin(gTime * 75) * 12);
+    } else if (Math.random() < 0.15) {
+      s1 = (Math.random() - 0.5) * 8;
+      s2 = (Math.random() - 0.5) * 14;
+      s3 = (Math.random() - 0.5) * 8;
+    }
+
+    // DRAW SLICE 1: Ears
+    if (progress > 0.1) {
+      ctx.save();
+      ctx.translate(bossX + offsetX + glitchX + s1, bossY);
+      // Left Ear
+      ctx.beginPath();
+      ctx.moveTo(-40, -40); ctx.lineTo(-80, -110); ctx.lineTo(-95, -70); ctx.lineTo(-40, -40);
+      ctx.stroke();
+      // Right Ear
+      ctx.beginPath();
+      ctx.moveTo(40, -40); ctx.lineTo(80, -110); ctx.lineTo(95, -70); ctx.lineTo(40, -40);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // DRAW SLICE 2: Head Outline, Eyes, Forehead
+    if (progress > 0.45) {
+      ctx.save();
+      ctx.translate(bossX + offsetX + glitchX + s2, bossY);
+      // Head Outline
+      ctx.beginPath();
+      ctx.moveTo(-40, -40); ctx.lineTo(40, -40); ctx.lineTo(95, -70); ctx.lineTo(105, 0); ctx.lineTo(65, 55); ctx.lineTo(0, 75); ctx.lineTo(-65, 55); ctx.lineTo(-105, 0); ctx.lineTo(-95, -70);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Cheeks/Inner Lines
+      ctx.beginPath();
+      ctx.moveTo(-65, 55); ctx.lineTo(-40, 10); ctx.lineTo(40, 10); ctx.lineTo(65, 55);
+      ctx.stroke();
+
+      // Forehead diamond
+      ctx.beginPath();
+      ctx.moveTo(0, -35); ctx.lineTo(20, -15); ctx.lineTo(0, 5); ctx.lineTo(-20, -15);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Eyes
+      if (progress > 0.75) {
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.globalAlpha *= 0.3;
+        
+        // Angry eye shape if firing or charging!
+        if (activeLaser) {
+          // Left angry eye
+          ctx.beginPath(); ctx.moveTo(-58, -16); ctx.lineTo(-38, -28); ctx.lineTo(-22, -8); ctx.lineTo(-42, 6); ctx.closePath(); ctx.fill();
+          // Right angry eye
+          ctx.beginPath(); ctx.moveTo(58, -16); ctx.lineTo(38, -28); ctx.lineTo(22, -8); ctx.lineTo(42, 6); ctx.closePath(); ctx.fill();
+        } else {
+          // Normal eye
+          ctx.beginPath(); ctx.moveTo(-55, -12); ctx.lineTo(-40, -28); ctx.lineTo(-25, -12); ctx.lineTo(-40, 4); ctx.closePath(); ctx.fill();
+          ctx.beginPath(); ctx.moveTo(55, -12); ctx.lineTo(40, -28); ctx.lineTo(25, -12); ctx.lineTo(40, 4); ctx.closePath(); ctx.fill();
+        }
+        ctx.restore();
+
+        ctx.lineWidth = lineWidth * 1.5;
+        if (activeLaser) {
+          ctx.beginPath();
+          ctx.moveTo(-58, -16); ctx.lineTo(-38, -28); ctx.lineTo(-22, -8); ctx.lineTo(-42, 6); ctx.closePath();
+          ctx.moveTo(58, -16); ctx.lineTo(38, -28); ctx.lineTo(22, -8); ctx.lineTo(42, 6); ctx.closePath();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(-55, -12); ctx.lineTo(-40, -28); ctx.lineTo(-25, -12); ctx.lineTo(-40, 4); ctx.closePath();
+          ctx.moveTo(55, -12); ctx.lineTo(40, -28); ctx.lineTo(25, -12); ctx.lineTo(40, 4); ctx.closePath();
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // DRAW SLICE 3: Nose, Mouth, Whiskers
+    if (progress > 0.6) {
+      ctx.save();
+      ctx.translate(bossX + offsetX + glitchX + s3, bossY);
+      // Nose
+      ctx.beginPath();
+      ctx.moveTo(0, 8); ctx.lineTo(-10, 18); ctx.lineTo(10, 18);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Mouth - evil grin screaming if firing!
+      ctx.beginPath();
+      if (activeLaser && activeLaser.state === 'active') {
+        ctx.moveTo(-25, 24); ctx.lineTo(0, 44); ctx.lineTo(25, 24); ctx.lineTo(12, 18); ctx.lineTo(-12, 18); ctx.closePath();
+        ctx.fillStyle = 'rgba(255, 0, 85, 0.2)';
+        ctx.fill();
+      } else {
+        ctx.moveTo(-25, 28); ctx.lineTo(-12, 36); ctx.lineTo(0, 28); ctx.lineTo(12, 36); ctx.lineTo(25, 28);
+      }
+      ctx.stroke();
+
+      // Whiskers
+      ctx.beginPath();
+      ctx.moveTo(-85, 12); ctx.lineTo(-125, 5);
+      ctx.moveTo(-85, 22); ctx.lineTo(-120, 22);
+      ctx.moveTo(85, 12); ctx.lineTo(125, 5);
+      ctx.moveTo(85, 22); ctx.lineTo(120, 22);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.restore();
+  };
+
+  // Compile Progress Calculation
+  let compileProg = 1.0;
+  if (bossCinematic.state === 'drawing') {
+    compileProg = Math.min(1.0, Math.max(0.0, (bossCinematic.timer - 0.8) / 1.6));
+  }
+
+  // Draw wireframe head in triple layers (glowing RGB outrun style)
+  drawHead(-3, 'rgba(255, 0, 110, 0.4)', 1.5, 0, compileProg); 
+  drawHead(3, 'rgba(0, 246, 255, 0.4)', 1.5, 0, compileProg);  
+  drawHead(0, '#00ffff', 2.0, 15, compileProg);                
+
+  // Concentric soundwave ripples during roar
+  if (bossCinematic.state === 'roar') {
+    ctx.save();
+    const roarTime = bossCinematic.timer - 2.4; // time elapsed in roar
+    ctx.strokeStyle = '#ff0055';
+    ctx.shadowColor = '#ff0055';
+    ctx.shadowBlur = 25;
+    
+    // Draw 3 expanding rings
+    for (let i = 0; i < 3; i++) {
+      const ringProg = (roarTime * 2.5 + i / 3) % 1.0;
+      const radius = ringProg * 280;
+      ctx.lineWidth = 4 * (1.0 - ringProg);
+      ctx.globalAlpha = fade * (1.0 - ringProg) * 0.75;
+      
+      ctx.beginPath();
+      ctx.arc(bossX, bossY + 28, radius, 0, 6.28);
+      ctx.stroke();
+      
+      // Secondary cyan ring slightly offset
+      ctx.strokeStyle = '#00ffff';
+      ctx.shadowColor = '#00ffff';
+      ctx.lineWidth = 2 * (1.0 - ringProg);
+      ctx.beginPath();
+      ctx.arc(bossX, bossY + 28, radius * 1.05, 0, 6.28);
+      ctx.stroke();
+      
+      ctx.strokeStyle = '#ff0055';
+      ctx.shadowColor = '#ff0055';
+    }
+    ctx.restore();
+  }
+
+  // 3. Draw Red Glowing digital Pupils
+  if (compileProg > 0.8) {
+    ctx.save();
+    ctx.translate(bossX + glitchX, bossY);
+    let pupilPulse = 3.5 + Math.sin(gTime * 25) * 1.5;
+    if (activeLaser) pupilPulse = 6.0 + Math.sin(gTime * 40) * 2.5; // wider red glare if attacking!
+    
+    ctx.fillStyle = '#ff0055';
+    ctx.shadowColor = '#ff0055';
+    ctx.shadowBlur = activeLaser ? 24 : 12;
+    ctx.beginPath();
+    ctx.arc(-40, -12, pupilPulse, 0, 6.28);
+    ctx.arc(40, -12, pupilPulse, 0, 6.28);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 4. Moving CRT scanlines overlaying face
+  ctx.save();
+  ctx.translate(bossX + glitchX, bossY);
+  ctx.strokeStyle = 'rgba(0, 255, 135, 0.2)';
+  ctx.lineWidth = 1;
+  const scanY = ((gTime * 90) % 220) - 110;
+  if (scanY > -110 && scanY < 90) {
+    ctx.beginPath();
+    ctx.moveTo(-110, scanY);
+    ctx.lineTo(110, scanY);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 5. HUD Diagnostic printouts on the left/right of the boss head
+  if (compileProg > 0.4) {
+    ctx.save();
+    ctx.translate(bossX + glitchX, bossY);
+    ctx.fillStyle = 'rgba(0, 246, 255, 0.75)';
+    ctx.font = 'bold 9px monospace';
+    
+    // Left stats
+    ctx.textAlign = 'left';
+    ctx.fillText("BOSS: CYBER_CAT_v9.5", 130, -50);
+    ctx.fillText(`THREAT: ${activeLaser ? "CRITICAL!!" : "EXTREME"}`, 130, -36);
+    ctx.fillText(`ENERGY: ${~~(80 + Math.sin(gTime * 12) * 15)}%`, 130, -22);
+    ctx.fillText(`DISSIPATION: ${~~(1200 + Math.cos(gTime * 5) * 200)}W`, 130, -8);
+    
+    // Sine audio graph mockup
+    ctx.strokeStyle = 'rgba(0, 246, 255, 0.35)';
+    ctx.lineWidth = 1.0;
+    ctx.beginPath();
+    for (let x = 0; x < 60; x += 3) {
+      const yVal = Math.sin(x * 0.15 + gTime * 15) * (activeLaser ? 14 : 6) - 30;
+      if (x === 0) ctx.moveTo(130 + x, yVal);
+      else ctx.lineTo(130 + x, yVal);
+    }
+    ctx.stroke();
+
+    // Right stats
+    ctx.textAlign = 'right';
+    ctx.fillText(`TARGET_LOCK: ${activeLaser ? "TRUE (100%)" : "TRUE (82%)"}`, -130, -50);
+    ctx.fillText(`WEAPON_SYS: ${activeLaser ? "FIRING!!!" : "STANDBY"}`, -130, -36);
+    ctx.fillText("SECTOR: ASCENSION", -130, -22);
+    ctx.fillText(`HEX_DUMP: 0x${Math.floor(gTime*189).toString(16).toUpperCase()}`, -130, -8);
+    
+    // Symmetrical audio graph
+    ctx.beginPath();
+    for (let x = 0; x < 60; x += 3) {
+      const yVal = Math.sin((60 - x) * 0.15 + gTime * 15) * (activeLaser ? 14 : 6) - 30;
+      if (x === 0) ctx.moveTo(-130 - x, yVal);
+      else ctx.lineTo(-130 - x, yVal);
+    }
+    ctx.stroke();
+    
+    ctx.restore();
+  }
+
+  // 6. Spawn charge particles suctioning into eyes during warning phase
+  if (activeLaser && activeLaser.state === 'warning') {
+    if (Math.random() < 0.28) {
+      const isLeft = Math.random() < 0.5;
+      const targetX = isLeft ? eyeLX : eyeRX;
+      const targetY = eyeLY;
+      const startAngle = Math.random() * 6.28;
+      const startDist = 180 + Math.random() * 120;
+      bossChargeParts.push({
+        x: targetX + Math.cos(startAngle) * startDist,
+        y: targetY + Math.sin(startAngle) * startDist,
+        tx: targetX,
+        ty: targetY,
+        speed: 3.8 + Math.random() * 2.2,
+        char: Math.random() < 0.55 ? (Math.random() < 0.5 ? '1' : '0') : 'x',
+        color: Math.random() < 0.5 ? '#ff0055' : '#00ffff',
+        size: 9 + Math.random() * 5
+      });
+    }
+  }
+
+  // Update and draw charge particles
+  for (let i = bossChargeParts.length - 1; i >= 0; i--) {
+    const p = bossChargeParts[i];
+    p.x += (p.tx - p.x) * p.speed * dt;
+    p.y += (p.ty - p.y) * p.speed * dt;
+    
+    ctx.save();
+    ctx.fillStyle = p.color;
+    ctx.font = `bold ${p.size}px monospace`;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 8;
+    ctx.fillText(p.char, p.x, p.y);
+    ctx.restore();
+
+    // Check hit target
+    const dx = p.tx - p.x;
+    const dy = p.ty - p.y;
+    if (Math.sqrt(dx*dx + dy*dy) < 6) {
+      // Spawn tiny eye sparkles
+      for (let j = 0; j < 4; j++) {
+        const angle = Math.random() * 6.28;
+        const sp = 45 + Math.random() * 85;
+        const fx = fxPool.get();
+        fx.x = p.tx;
+        fx.y = p.ty;
+        fx.vx = Math.cos(angle) * sp;
+        fx.vy = Math.sin(angle) * sp;
+        fx.s = 1.5 + Math.random() * 2;
+        fx.a = 1.0;
+        fx.l = 0.35;
+        fx.c = p.color;
+      }
+      bossChargeParts.splice(i, 1);
+    }
+  }
+
+  // 7. Cinematic Subtitles and Dialog update
+  let currentSpeech = "";
+  let newSpeakIdx = -1;
+
+  if (bossCinematic.state === 'intro') {
+    currentSpeech = "🚨 CONNEXION SYSTÈME... COMPILATION DE L'UNITÉ CENTRALE 🚨";
+    newSpeakIdx = 100;
+  } else if (bossCinematic.state === 'drawing') {
+    currentSpeech = "CHARGEMENT DE LA MATRICE HOLOGRAPHIQUE FELINE.EXE (99%)";
+    newSpeakIdx = 101;
+  } else if (bossCinematic.state === 'roar') {
+    currentSpeech = "🚨 COMPILATION REUSSIE. INTRUS DETECTE ! PROTOCOLE EXTERMINATION ! 🚨";
+    newSpeakIdx = 102;
+  } else if (activeLaser) {
+    if (activeLaser.type === 'high') {
+      currentSpeech = "⬇️ FAISCEAU SUPÉRIEUR CHARGÉ ! PROSTERNE-TOI OU SOIS DÉCAPITÉ ! ⬇️";
+      newSpeakIdx = activeLaser.col * 2;
+    } else {
+      currentSpeech = "⬆️ ATTENTION AU SOL ! LE NEON SUPRÊME VA CHAUFFER TES PIEDS ! ⬆️";
+      newSpeakIdx = activeLaser.col * 2 + 1;
+    }
+  } else {
+    // Normal fight dialogues
+    const pCol = Math.floor(P.x / TILE);
+    if (pCol >= 442 && pCol < 460) {
+      currentSpeech = "👾 PROTOCOLE ASCENSION ACTIF... SAUTE ET GLISSE, PETIT INSECTE ! 👾";
+      newSpeakIdx = 1;
+    } else if (pCol >= 460 && pCol < 480) {
+      currentSpeech = "Analyse de tes réflexes... Résultat : Inférieur aux normes félines ! 🤖";
+      newSpeakIdx = 2;
+    } else if (pCol >= 480 && pCol < 500) {
+      currentSpeech = "Tu penses pouvoir m'esquiver ? Mes bobines se rechargent ! ⚡";
+      newSpeakIdx = 3;
+    } else if (pCol >= 500 && pCol < 513) {
+      currentSpeech = "⚠️ ERREUR SYSTÈME : DISSIPATION THERMIQUE DEPASSEE ! NON ! ⚠️";
+      newSpeakIdx = 4;
+    } else if (pCol >= 513) {
+      currentSpeech = "💥 CODE INTERROMPU. DÉCONNEXION EN COURS. JE REVIENDRAI !!! 💥";
+      newSpeakIdx = 5;
+    }
+  }
+
+  if (newSpeakIdx !== bossSpeakIdx) {
+    bossSpeech = currentSpeech;
+    bossSpeechT = 0;
+    bossSpeakIdx = newSpeakIdx;
+  }
+  bossSpeechT += dt;
+
+  // 8. Draw black cinematic letterbox widescreen bars
+  if (bossCinematic.widescreenPercent > 0) {
+    ctx.save();
+    ctx.fillStyle = '#05020c';
+    const barH = 50 * bossCinematic.widescreenPercent;
+    
+    // Top bar
+    ctx.fillRect(0, 0, w, barH);
+    ctx.strokeStyle = '#ff0055';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = '#ff0055';
+    ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.moveTo(0, barH); ctx.lineTo(w, barH); ctx.stroke();
+    
+    // Bottom bar
+    ctx.fillRect(0, h - barH, w, barH);
+    ctx.beginPath(); ctx.moveTo(0, h - barH); ctx.lineTo(w, h - barH); ctx.stroke();
+    
+    // Alert label in top bar
+    if (bossCinematic.widescreenPercent > 0.6) {
+      ctx.fillStyle = Math.floor(gTime * 5) % 2 === 0 ? '#ff0055' : '#ffffff';
+      ctx.font = '800 12px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText("🚨 ALERTE SYSTÈME : ANOMALIE CYBERNÉTIQUE DÉTECTÉE 🚨", w/2, barH / 2);
+    }
+    ctx.restore();
+  }
+
+  // 9. Draw compiling sweeps and diagnostic UI during the drawing phase
+  if (bossCinematic.state === 'drawing') {
+    const sweepY = bossY - 110 + compileProg * 190;
+    ctx.save();
+    ctx.strokeStyle = '#00ff87';
+    ctx.lineWidth = 2.0;
+    ctx.shadowColor = '#00ff87';
+    ctx.shadowBlur = 20;
+    ctx.beginPath();
+    ctx.moveTo(bossX - 150, sweepY);
+    ctx.lineTo(bossX + 150, sweepY);
+    ctx.stroke();
+    
+    ctx.strokeStyle = 'rgba(0, 255, 135, 0.08)';
+    ctx.lineWidth = 1.0;
+    ctx.shadowBlur = 0;
+    for (let i = 0; i < 4; i++) {
+      const lineY = sweepY - i * 16;
+      if (lineY > bossY - 110) {
+        ctx.beginPath(); ctx.moveTo(bossX - 150, lineY); ctx.lineTo(bossX + 150, lineY); ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = '#00ff87';
+    ctx.font = '800 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#00ff87';
+    ctx.shadowBlur = 8;
+    ctx.fillText(`SCANNING OBJECT... COMPILING HOLOGRAPH: ${~~(compileProg * 100)}%`, bossX, bossY + 95);
+    ctx.restore();
+  }
+
+  // 10. Draw Outrun Speech bubble / typewriter dialog
+  if (bossSpeech && bossSpeechT > 0 && bossSpeechT < 5.0) {
+    const bubbleW = w * 0.76;
+    const bubbleH = 50;
+    const bubbleX = (w - bubbleW) / 2;
+    const bubbleY = h - 55 - (bossCinematic.widescreenPercent * 15); // Adjust height based on cinematic bars
+    
+    ctx.save();
+    // Glass body
+    ctx.fillStyle = 'rgba(10, 5, 20, 0.82)';
+    ctx.beginPath(); ctx.roundRect(bubbleX, bubbleY, bubbleW, bubbleH, 8); ctx.fill();
+    
+    // Outrun glowing pink outline
+    ctx.strokeStyle = '#ff2a6d';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = '#ff2a6d';
+    ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.roundRect(bubbleX, bubbleY, bubbleW, bubbleH, 8); ctx.stroke();
+    
+    // Glowing cyan accent corners
+    ctx.strokeStyle = '#00ffff';
+    ctx.lineWidth = 2.5;
+    ctx.shadowColor = '#00ffff';
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    // Top-left corner
+    ctx.moveTo(bubbleX, bubbleY + 12); ctx.lineTo(bubbleX, bubbleY); ctx.lineTo(bubbleX + 12, bubbleY);
+    // Bottom-right corner
+    ctx.moveTo(bubbleX + bubbleW - 12, bubbleY + bubbleH); ctx.lineTo(bubbleX + bubbleW, bubbleY + bubbleH); ctx.lineTo(bubbleX + bubbleW, bubbleY + bubbleH - 12);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    
+    // Text rendering with typewriter slice
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    // Flashing Cyber-Cat name tag
+    ctx.fillStyle = '#ffdd00';
+    ctx.font = '900 11px monospace';
+    ctx.fillText("🤖 HOLOGRAPHE UNITÉ CENTRALE (CYBER-CAT) :", w / 2, bubbleY + 15);
+    
+    // Sliced dialogue text
+    let displayChars = Math.min(bossSpeech.length, Math.floor(bossSpeechT * 26));
+    let textToShow = bossSpeech.substring(0, displayChars);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'italic 13px "Segoe UI", sans-serif';
+    ctx.fillText(`"${textToShow}"`, w / 2, bubbleY + 34);
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+function drawBossLasers() {
+  if (P.x < 442 * TILE) return;
+  const w = W(), h = H(), gy = groundY();
+  
+  const floatY = Math.sin(gTime * 2.0) * 12;
+  const bossX = w / 2;
+  const bossY = h * 0.35 + floatY;
+  let glitchX = 0;
+  if (Math.random() < 0.15) glitchX = (Math.random() - 0.5) * 16;
+  
+  const eyeLX = bossX - 40 + glitchX;
+  const eyeLY = bossY - 12;
+  const eyeRX = bossX + 40 + glitchX;
+  const eyeRY = bossY - 12;
+  
+  for (const laser of bossLasers) {
+    if (laser.state === 'inactive' || laser.state === 'fired') continue;
+    
+    const lx = laser.col * TILE - camX;
+    const midX = lx + TILE/2;
+    
+    if (laser.state === 'warning') {
+      // 1. Blinking warning light beam
+      ctx.save();
+      const pulse = 0.10 + Math.sin(gTime * 24) * 0.07;
+      ctx.fillStyle = `rgba(255, 0, 85, ${pulse})`;
+      ctx.fillRect(lx, CEILING_Y, TILE, gy - CEILING_Y);
+      
+      ctx.strokeStyle = '#ff0055';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([8, 8]);
+      ctx.beginPath();
+      ctx.moveTo(lx, CEILING_Y); ctx.lineTo(lx, gy);
+      ctx.moveTo(lx + TILE, CEILING_Y); ctx.lineTo(lx + TILE, gy);
+      ctx.stroke();
+      ctx.restore();
+      
+      // 2. Targeting lasers from the eyes
+      ctx.save();
+      ctx.strokeStyle = `rgba(255, 0, 85, ${0.45 + Math.sin(gTime * 20) * 0.25})`;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(eyeLX, eyeLY);
+      ctx.lineTo(midX, CEILING_Y);
+      ctx.moveTo(eyeRX, eyeRY);
+      ctx.lineTo(midX, CEILING_Y);
+      ctx.stroke();
+      ctx.restore();
+      
+      // 3. Cyber radar target crosshair reticle zooming and locking in
+      const warnPct = Math.min(1.0, laser.timer / 0.7);
+      const reticleR = 64 * (1.0 - warnPct * 0.8) + 12;
+      const targetY = (laser.type === 'high') ? (gy - 16) : (gy - 60);
+      
+      ctx.save();
+      ctx.translate(midX, targetY);
+      
+      // Outer primary rotating scope
+      ctx.save();
+      ctx.rotate(gTime * 3.5);
+      ctx.strokeStyle = '#ff0055';
+      ctx.lineWidth = 2.0;
+      ctx.shadowColor = '#ff0055';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(0, 0, reticleR, 0, 6.28);
+      ctx.stroke();
+      
+      // Dotted crosshairs
+      ctx.beginPath();
+      ctx.moveTo(-reticleR - 8, 0); ctx.lineTo(-reticleR + 3, 0);
+      ctx.moveTo(reticleR - 3, 0); ctx.lineTo(reticleR + 8, 0);
+      ctx.moveTo(0, -reticleR - 8); ctx.lineTo(0, -reticleR + 3);
+      ctx.moveTo(0, reticleR - 3); ctx.lineTo(0, reticleR + 8);
+      ctx.stroke();
+      ctx.restore();
+      
+      // Inner secondary counter-rotating dotted ring
+      ctx.save();
+      ctx.rotate(-gTime * 5.5);
+      ctx.strokeStyle = '#00ffff';
+      ctx.lineWidth = 1.0;
+      ctx.shadowColor = '#00ffff';
+      ctx.shadowBlur = 6;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(0, 0, reticleR * 0.65, 0, 6.28);
+      ctx.stroke();
+      ctx.restore();
+      
+      // Cyber corner locking brackets
+      ctx.strokeStyle = '#ff0055';
+      ctx.lineWidth = 1.5;
+      ctx.shadowBlur = 0;
+      const bSize = reticleR + 6;
+      // Top-Left bracket
+      ctx.beginPath(); ctx.moveTo(-bSize, -bSize + 8); ctx.lineTo(-bSize, -bSize); ctx.lineTo(-bSize + 8, -bSize); ctx.stroke();
+      // Top-Right bracket
+      ctx.beginPath(); ctx.moveTo(bSize, -bSize + 8); ctx.lineTo(bSize, -bSize); ctx.lineTo(bSize - 8, -bSize); ctx.stroke();
+      // Bottom-Left bracket
+      ctx.beginPath(); ctx.moveTo(-bSize, bSize - 8); ctx.lineTo(-bSize, bSize); ctx.lineTo(-bSize + 8, bSize); ctx.stroke();
+      // Bottom-Right bracket
+      ctx.beginPath(); ctx.moveTo(bSize, bSize - 8); ctx.lineTo(bSize, bSize); ctx.lineTo(bSize - 8, bSize); ctx.stroke();
+      
+      // Lock percentage text
+      ctx.fillStyle = '#00ffff';
+      ctx.font = 'bold 8px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const pctVal = ~~(warnPct * 100);
+      ctx.fillText(`LOCK: ${pctVal}%`, 0, -reticleR - 16);
+      
+      ctx.restore();
+      
+      // 4. Warning alert triangle signs
+      ctx.save();
+      ctx.translate(midX, CEILING_Y + 50 + Math.sin(gTime * 12) * 3);
+      
+      ctx.shadowColor = '#ff2a6d';
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = '#ff2a6d';
+      ctx.beginPath();
+      ctx.moveTo(0, -18);
+      ctx.lineTo(18, 12);
+      ctx.lineTo(-18, 12);
+      ctx.closePath();
+      ctx.fill();
+      
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('!', 0, 6);
+      
+      ctx.font = '800 11px "Segoe UI", sans-serif';
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowBlur = 0;
+      if (laser.type === 'high') {
+        ctx.fillText('🚨 GLISSER ! 🚨', 0, 24);
+      } else {
+        ctx.fillText('🚨 SAUTER ! 🚨', 0, 24);
+      }
+      ctx.restore();
+    }
+    
+    if (laser.state === 'active') {
+      // 1. Draw solid eye lasers charging down
+      ctx.save();
+      ctx.strokeStyle = '#ff0055';
+      ctx.lineWidth = 5;
+      ctx.shadowColor = '#ff0055';
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      ctx.moveTo(eyeLX, eyeLY);
+      ctx.lineTo(midX, CEILING_Y);
+      ctx.moveTo(eyeRX, eyeRY);
+      ctx.lineTo(midX, CEILING_Y);
+      ctx.stroke();
+      
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2.0;
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.moveTo(eyeLX, eyeLY);
+      ctx.lineTo(midX, CEILING_Y);
+      ctx.moveTo(eyeRX, eyeRY);
+      ctx.lineTo(midX, CEILING_Y);
+      ctx.stroke();
+      ctx.restore();
+      
+      ctx.save();
+      const startY = CEILING_Y;
+      const endY = (laser.type === 'high') ? (gy - 36) : gy;
+      
+      // 2. High-power outer blast beam
+      ctx.globalAlpha = 0.95;
+      ctx.strokeStyle = '#ff0055';
+      ctx.lineWidth = 32;
+      ctx.shadowColor = '#ff0055';
+      ctx.shadowBlur = 30;
+      ctx.beginPath();
+      ctx.moveTo(midX, startY); ctx.lineTo(midX, endY);
+      ctx.stroke();
+      
+      // Mid hot envelope
+      ctx.strokeStyle = '#ff66bb';
+      ctx.lineWidth = 16;
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.moveTo(midX, startY); ctx.lineTo(midX, endY);
+      ctx.stroke();
+      
+      // White-hot plasma core
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(midX, startY); ctx.lineTo(midX, endY);
+      ctx.stroke();
+      ctx.restore();
+
+      // 3. Crackling lightning arcs crawling down the sides of the laser column!
+      if (Math.random() < 0.75) {
+        drawLightning(midX - 4 + (Math.random() - 0.5) * 6, startY, midX - 4 + (Math.random() - 0.5) * 6, endY, 6, 12, '#ff00aa', 2.0);
+        drawLightning(midX + 4 + (Math.random() - 0.5) * 6, startY, midX + 4 + (Math.random() - 0.5) * 6, endY, 6, 12, '#00ffff', 2.0);
+      }
+
+      // 4. Glowing ellipses sliding vertically down the beam to represent energy pulses
+      const ringCount = 3;
+      for (let i = 0; i < ringCount; i++) {
+        const progress = ((gTime * 3.2 + i / ringCount) % 1.0);
+        const ry = startY + progress * (endY - startY);
+        ctx.save();
+        ctx.strokeStyle = i % 2 === 0 ? '#00ffff' : '#ff0055';
+        ctx.lineWidth = 2.2;
+        ctx.shadowColor = ctx.strokeStyle;
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.ellipse(midX, ry, 18 * (1.0 - progress * 0.3), 4.5, 0, 0, 6.28);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 5. High-voltage ground impact splash particles!
+      if (Math.random() < 0.7) {
+        for (let j = 0; j < 3; j++) {
+          const p = fxPool.get();
+          p.x = midX;
+          p.y = endY;
+          p.vx = (Math.random() - 0.5) * 280;
+          p.vy = -Math.random() * 140 - 60;
+          p.s = 2.0 + Math.random() * 3.5;
+          p.a = 1.0;
+          p.l = 0.30 + Math.random() * 0.25;
+          p.c = Math.random() < 0.5 ? '#ff0055' : '#00ffff';
+        }
+      }
+    }
+  }
+}
+
 // === LOOP ===
 function drawTimeWarpFX() {
   if (timeWarpTimer <= 0) return;
@@ -2649,7 +4292,7 @@ function loop(ts){
   ctx.save();ctx.translate(shake.x,shake.y);
   if(gravAnim>0){ctx.translate(w/2,h/2);ctx.rotate(Math.sin(gravAnim*3.14)*.06);ctx.translate(-w/2,-h/2);}
   
-  // Calculate Matrix Time-Warp Zoom & Tilt
+  // Calculate Matrix Time-Warp Zoom & Tilt + Boss Cinematic Camera
   let currentZoom = 1.0;
   let camTilt = 0;
   if(timeWarpTimer > 0) {
@@ -2658,23 +4301,43 @@ function loop(ts){
     camTilt = Math.sin(tRatio * Math.PI) * 0.035;
   }
   
+  let finalZoom = currentZoom * bossCam.zoom;
+  let finalYOffset = bossCam.yOffset;
+  let finalXOffset = 0;
+  if(state === 'introCinematic') {
+    finalZoom = introCam.zoom;
+    finalYOffset = introCam.yOffset;
+    finalXOffset = introCam.xOffset;
+    camTilt = introCam.tilt;
+  }
+  
   ctx.save();
-  if(currentZoom > 1.0) {
-    const px = P.x - camX + P.w/2;
-    const py = P.y + P.h/2;
+  if(finalZoom !== 1.0 || finalYOffset !== 0 || finalXOffset !== 0 || camTilt !== 0) {
+    let px = P.x - camX + P.w/2;
+    let py = P.y + P.h/2;
+    
+    // Smoothly shift camera target from player to boss during cinematic camera zoom
+    if (bossCam.zoom > 1.0 && bossCinematic.state !== 'inactive') {
+      const mixRatio = Math.min(1.0, (bossCam.zoom - 1.0) / 0.45);
+      px = px * (1 - mixRatio) + (w / 2) * mixRatio;
+      py = py * (1 - mixRatio) + (h * 0.35) * mixRatio;
+    }
+    
     ctx.translate(px, py);
-    ctx.scale(currentZoom, currentZoom);
+    ctx.scale(finalZoom, finalZoom);
     if(camTilt !== 0) ctx.rotate(camTilt);
-    ctx.translate(-px, -py);
+    ctx.translate(-px - finalXOffset / finalZoom, -py - finalYOffset / finalZoom);
   }
   
   drawBG();
   if(state==='play'||state==='dead')drawSpdLines();
+  drawCyberBoss();
   drawGround();
   drawObs();
   drawTrail();
   drawPart();
-  if(state==='play'||state==='countdown') drawPlayer();
+  drawBossLasers();
+  if(state==='play'||state==='countdown'||(state==='introCinematic' && introCinematicTimer >= 2.8)) drawPlayer();
   
   ctx.restore();
   
@@ -2683,9 +4346,13 @@ function loop(ts){
     drawSecTitle();
     drawCat();
     drawIntro();
+    drawSlideWarning();
   }
   if(state==='countdown'){
     drawCD();
+  }
+  if(state==='introCinematic'){
+    drawIntroCinematicUI();
   }
   
   drawTimeWarpFX();
