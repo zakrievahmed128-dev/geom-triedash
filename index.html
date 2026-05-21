@@ -150,13 +150,31 @@ canvas{display:block;width:100vw;height:100vh;cursor:pointer;touch-action:none}
 
 <!-- CONTENEUR DU CHAT ROBLOX -->
 <div id="chatContainer" style="display:none; position:absolute; top:20px; left:20px; width:340px; font-family:'Courier New',monospace; z-index:200; pointer-events:none;">
-  <div id="chatHistory" style="height:180px; overflow-y:auto; background:rgba(10,5,25,0.55); border:1.5px solid rgba(0,255,135,0.25); border-radius:6px; padding:8px; color:#fff; font-size:12px; margin-bottom:6px; box-shadow:0 0 15px rgba(0,255,135,0.05); pointer-events:auto;"></div>
-  <input id="chatInput" type="text" maxlength="120" placeholder="Appuyez sur Entrée pour parler..." style="width:100%; padding:8px 12px; background:rgba(10,5,25,0.85); border:2px solid #00ff87; border-radius:20px; color:#fff; font-size:12px; outline:none; box-shadow:0 0 10px rgba(0,255,135,0.25); pointer-events:auto; display:none;">
+  <div id="chatHistory" style="height:180px; overflow-y:auto; background:rgba(10,5,25,0.55); border:1.5px solid rgba(0,255,135,0.25); border-radius:6px; padding:8px; color:#fff; font-size:12px; margin-bottom:6px; box-shadow:0 0 15px rgba(0,255,135,0.05); pointer-events:auto; touch-action: pan-y;"></div>
+  <div id="chatInputWrapper" style="display:none; pointer-events:auto; gap:5px; align-items:center;">
+    <input id="chatInput" type="text" maxlength="120" placeholder="Appuyez sur Entrée pour parler..." style="flex:1; padding:8px 12px; background:rgba(10,5,25,0.85); border:2px solid #00ff87; border-radius:20px; color:#fff; font-size:12px; outline:none; box-shadow:0 0 10px rgba(0,255,135,0.25);">
+    <button id="chatSendBtn" style="background:#00ff87; color:#000; border:none; border-radius:50%; width:34px; height:34px; font-weight:bold; cursor:pointer; box-shadow:0 0 10px rgba(0,255,135,0.4); display:flex; justify-content:center; align-items:center; flex-shrink:0;">➤</button>
+  </div>
 </div>
 
 <button id="mpQuitBtn" style="display:none; position:absolute; top:20px; right:20px; padding:10px 22px; background:rgba(255,0,85,0.2); border:2px solid #ff0055; color:#fff; font-family:'Segoe UI',sans-serif; font-size:12px; font-weight:800; border-radius:20px; cursor:pointer; text-transform:uppercase; letter-spacing:1px; box-shadow:0 0 15px rgba(255,0,85,0.3); transition:all 0.2s ease; z-index:200;" onmouseover="this.style.background='rgba(255,0,85,0.55)'; this.style.boxShadow='0 0 20px rgba(255,0,85,0.6)'; this.style.transform='scale(1.05)';" onmouseout="this.style.background='rgba(255,0,85,0.2)'; this.style.boxShadow='0 0 15px rgba(255,0,85,0.3)'; this.style.transform='scale(1)';">
   ❌ QUITTER
 </button>
+
+<button id="mobileChatToggleBtn" style="display:none; position:absolute; top:80px; left:20px; padding:10px; background:rgba(0,255,135,0.2); border:2px solid #00ff87; color:#fff; border-radius:50%; width:45px; height:45px; font-size:18px; cursor:pointer; box-shadow:0 0 15px rgba(0,255,135,0.3); z-index:200; align-items:center; justify-content:center;">
+  💬
+</button>
+
+<!-- Mobile Controls for Multiplayer -->
+<div id="mobileMpControls" style="display:none; position:absolute; bottom:20px; left:0; right:0; padding:0 20px; z-index:150; justify-content:space-between; pointer-events:none; font-family:'Segoe UI',sans-serif;">
+  <div style="display:flex; gap:15px; pointer-events:auto;">
+    <button id="btnLeft" style="width:60px; height:60px; border-radius:50%; background:rgba(255,255,255,0.15); border:2px solid rgba(255,255,255,0.4); color:white; font-size:24px; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px); touch-action:none;">⬅</button>
+    <button id="btnRight" style="width:60px; height:60px; border-radius:50%; background:rgba(255,255,255,0.15); border:2px solid rgba(255,255,255,0.4); color:white; font-size:24px; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px); touch-action:none;">➡</button>
+  </div>
+  <div style="pointer-events:auto;">
+    <button id="btnJump" style="width:70px; height:70px; border-radius:50%; background:rgba(0,255,135,0.2); border:2px solid #00ff87; color:white; font-size:24px; display:flex; justify-content:center; align-items:center; backdrop-filter:blur(4px); touch-action:none; box-shadow:0 0 15px rgba(0,255,135,0.3);">⬆</button>
+  </div>
+</div>
 
 <button id="fsBtn">📱 Plein écran (Recommandé)</button>
 <audio id="bgMusic" src="Velocity_Park.mp3" preload="auto" loop></audio>
@@ -4904,8 +4922,18 @@ function joinWorld(id, name, host) {
   mp.justJoined = (host !== mp.nickname);
   state = 'multiplayerSandbox';
   
-  // Position flat on floor
-  P.x = 100;
+  // Setup mobile specific UI for multiplayer
+  const isMobile = window.innerWidth <= 768;
+  if (isMobile) {
+    document.getElementById('mobileMpControls').style.display = 'flex';
+    document.getElementById('mobileChatToggleBtn').style.display = 'flex';
+    
+    // Resize chat container for mobile
+    const chatContainer = document.getElementById('chatContainer');
+    chatContainer.style.width = '260px';
+    chatContainer.style.top = '10px';
+    chatContainer.style.left = '10px';
+  }
   P.y = groundY() - P.h;
   P.vy = 0;
   sandboxP.vx = 0;
@@ -4963,6 +4991,8 @@ function leaveCurrentWorld() {
   
   document.getElementById('chatContainer').style.display = 'none';
   document.getElementById('mpQuitBtn').style.display = 'none';
+  document.getElementById('mobileMpControls').style.display = 'none';
+  document.getElementById('mobileChatToggleBtn').style.display = 'none';
   document.getElementById('menuMpBtnOverlay').style.display = 'flex';
   
   state = 'menu';
@@ -4974,8 +5004,8 @@ function leaveCurrentWorld() {
 function openChat() {
   if (chatActive) return;
   chatActive = true;
+  document.getElementById('chatInputWrapper').style.display = 'flex';
   const input = document.getElementById('chatInput');
-  input.style.display = 'block';
   input.focus();
 }
 
@@ -4984,7 +5014,7 @@ function closeChat() {
   chatActive = false;
   const input = document.getElementById('chatInput');
   input.value = '';
-  input.style.display = 'none';
+  document.getElementById('chatInputWrapper').style.display = 'none';
   canvas.focus();
 }
 
@@ -5355,6 +5385,34 @@ window.closeChat = closeChat;
 window.sendChatMessage = sendChatMessage;
 window.updateSandbox = updateSandbox;
 window.drawRemotePlayers = drawRemotePlayers;
+
+// Mobile Button Touch Listeners
+const setupMobileButton = (id, keyName, isDown) => {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  const handler = (e) => {
+    e.preventDefault();
+    if (state === 'multiplayerSandbox') {
+      sandboxP.keys[keyName] = isDown;
+    }
+  };
+  btn.addEventListener(isDown ? 'touchstart' : 'touchend', handler, { passive: false });
+  btn.addEventListener(isDown ? 'mousedown' : 'mouseup', handler);
+};
+
+setupMobileButton('btnLeft', 'left', true);
+setupMobileButton('btnLeft', 'left', false);
+setupMobileButton('btnRight', 'right', true);
+setupMobileButton('btnRight', 'right', false);
+setupMobileButton('btnJump', 'jump', true);
+setupMobileButton('btnJump', 'jump', false);
+
+document.getElementById('mobileChatToggleBtn').onclick = () => {
+  if (chatActive) closeChat();
+  else openChat();
+};
+
+document.getElementById('chatSendBtn').onclick = sendChatMessage;
 
 // Color randomization profile generator
 mp.myColors = {
