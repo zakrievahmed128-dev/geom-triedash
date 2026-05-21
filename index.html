@@ -43,12 +43,121 @@ canvas{display:block;width:100vw;height:100vh;cursor:pointer;touch-action:none}
   50% { box-shadow: 0 0 25px rgba(0, 255, 135, 0.7); }
   100% { box-shadow: 0 0 15px rgba(0, 201, 255, 0.4); }
 }
+#menuMpBtn:hover {
+  background: linear-gradient(135deg, rgba(147, 51, 234, 0.55), rgba(219, 39, 119, 0.55)) !important;
+  box-shadow: 0 0 30px rgba(217, 70, 239, 0.7) !important;
+  transform: scale(1.06) translateX(-47%) !important;
+  border-color: #f472b6 !important;
+}
+#menuMpBtn:active {
+  transform: scale(0.96) translateX(-52%) !important;
+}
+.mp-world-item {
+  background: rgba(25, 12, 45, 0.7);
+  border: 1.5px solid rgba(0, 201, 255, 0.3);
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+.mp-world-item:hover {
+  border-color: #00c9ff;
+  background: rgba(25, 12, 45, 0.95);
+  box-shadow: 0 0 12px rgba(0, 201, 255, 0.2);
+  transform: translateY(-2px);
+}
+.mp-join-btn {
+  background: #ff0055;
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  font-weight: 800;
+  border-radius: 20px;
+  font-size: 11px;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(255, 0, 85, 0.4);
+  transition: all 0.2s;
+}
+.mp-join-btn:hover {
+  background: #ff3377;
+  box-shadow: 0 0 15px rgba(255, 0, 85, 0.7);
+  transform: scale(1.05);
+}
+#mpWorldsList::-webkit-scrollbar, #chatHistory::-webkit-scrollbar {
+  width: 6px;
+}
+#mpWorldsList::-webkit-scrollbar-track, #chatHistory::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+}
+#mpWorldsList::-webkit-scrollbar-thumb, #chatHistory::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+#mpWorldsList::-webkit-scrollbar-thumb:hover, #chatHistory::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
 </style>
+<script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
 </head>
 <body>
+<img id="catImg" src="cat.gif" style="display:none">
+<img id="deadImg" src="dead.gif" style="display:none">
 <canvas id="c"></canvas>
-<img id="catImg" src="cat.gif" style="display:none" alt="">
-<img id="deadImg" src="dead.gif" style="display:none" alt="">
+
+<!-- OVERLAY BOUTON MULTI-JOUEURS DU MENU -->
+<div id="menuMpBtnOverlay" style="position:absolute; bottom:14vh; left:50%; transform:translateX(-50%); z-index:100; font-family:'Segoe UI',sans-serif;">
+  <button id="menuMpBtn" style="padding:14px 36px; background:linear-gradient(135deg, rgba(147,51,234,0.3), rgba(219,39,119,0.3)); border:2px solid #d946ef; color:#fff; font-size:16px; font-weight:800; border-radius:30px; cursor:pointer; text-transform:uppercase; letter-spacing:2px; box-shadow:0 0 20px rgba(217,70,239,0.35); transition:all 0.3s cubic-bezier(0.4, 0, 0.2, 1); backdrop-filter:blur(4px); display:flex; align-items:center; gap:8px;">
+    👥 MULTI-JOUEURS
+  </button>
+</div>
+
+<!-- SALON MULTI-JOUEURS (LOBBY) -->
+<div id="mpLobby" style="display:none; position:absolute; inset:0; background:rgba(5,2,12,0.92); backdrop-filter:blur(8px); flex-direction:column; justify-content:center; align-items:center; color:#fff; z-index:150; font-family:'Segoe UI',sans-serif; padding:20px;">
+  <h1 style="font-size:38px; font-weight:900; margin-bottom:8px; background:linear-gradient(135deg, #00ff87, #00c9ff); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-shadow:0 0 20px rgba(0,255,135,0.3);">CONCILIABULE MULTIJOUEURS</h1>
+  <p style="color:#aaa; font-size:13px; margin-bottom:30px; letter-spacing:1px; text-transform:uppercase;">Créez un salon ou rejoignez un monde actif</p>
+  
+  <div style="display:flex; gap:30px; width:100%; max-width:850px; height:360px;">
+    <!-- Créer un Monde -->
+    <div style="flex:1; background:rgba(20,10,35,0.55); border:1.5px solid rgba(0,255,135,0.25); border-radius:16px; padding:24px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 0 25px rgba(0,255,135,0.06);">
+      <div>
+        <h2 style="font-size:18px; color:#00ff87; margin-bottom:16px; display:flex; align-items:center; gap:8px;">👤 CONFIGURATION PROFIL</h2>
+        <div style="margin-bottom:16px;">
+          <label style="display:block; font-size:11px; color:#aaa; margin-bottom:6px; font-weight:bold;">VOTRE PSEUDONYME :</label>
+          <input id="mpNick" type="text" style="width:100%; padding:10px 14px; background:rgba(10,5,20,0.8); border:1.5px solid rgba(0,255,135,0.4); border-radius:8px; color:#fff; font-weight:bold; font-size:13px; outline:none; transition:all 0.25s;">
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="display:block; font-size:11px; color:#aaa; margin-bottom:6px; font-weight:bold;">NOM DE VOTRE SALON :</label>
+          <input id="mpWorldName" type="text" placeholder="Le Monde Extraordinaire" style="width:100%; padding:10px 14px; background:rgba(10,5,20,0.8); border:1.5px solid rgba(0,201,255,0.4); border-radius:8px; color:#fff; font-size:13px; outline:none; transition:all 0.25s;">
+        </div>
+      </div>
+      <button id="mpBtnCreate" style="width:100%; padding:14px; background:linear-gradient(135deg, #00ff87, #00c9ff); border:none; border-radius:10px; color:#05020c; font-size:14px; font-weight:800; cursor:pointer; text-transform:uppercase; letter-spacing:1px; box-shadow:0 0 15px rgba(0,255,135,0.4); transition:all 0.25s;">🚀 Créer le Monde</button>
+    </div>
+    
+    <!-- Mondes Actifs -->
+    <div style="flex:1; background:rgba(20,10,35,0.55); border:1.5px solid rgba(255,0,85,0.25); border-radius:16px; padding:24px; display:flex; flex-direction:column; box-shadow:0 0 25px rgba(255,0,85,0.06);">
+      <h2 style="font-size:18px; color:#ff0055; margin-bottom:16px; display:flex; align-items:center; gap:8px;">🌍 MONDES ACTIFS GLOBALS</h2>
+      <div id="mpWorldsList" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-right:4px;">
+        <div style="text-align:center; color:#777; font-size:13px; margin-top:60px;">Recherche des salons actifs...</div>
+      </div>
+    </div>
+  </div>
+  
+  <button id="mpBtnBack" style="margin-top:30px; padding:8px 24px; background:transparent; border:1.5px solid #fff; border-radius:20px; color:#fff; font-size:11px; font-weight:700; text-transform:uppercase; cursor:pointer; transition:all 0.25s;" onmouseover="this.style.background='#fff'; this.style.color='#05020c';" onmouseout="this.style.background='transparent'; this.style.color='#fff';">⬅️ Retour au Menu</button>
+</div>
+
+<!-- CONTENEUR DU CHAT ROBLOX -->
+<div id="chatContainer" style="display:none; position:absolute; top:20px; left:20px; width:340px; font-family:'Courier New',monospace; z-index:200; pointer-events:none;">
+  <div id="chatHistory" style="height:180px; overflow-y:auto; background:rgba(10,5,25,0.55); border:1.5px solid rgba(0,255,135,0.25); border-radius:6px; padding:8px; color:#fff; font-size:12px; margin-bottom:6px; box-shadow:0 0 15px rgba(0,255,135,0.05); pointer-events:auto; display:flex; flex-direction:column; gap:4px;"></div>
+  <input id="chatInput" type="text" placeholder="Appuyez sur Entrée pour parler..." style="width:100%; padding:8px 12px; background:rgba(10,5,25,0.85); border:2px solid #00ff87; border-radius:20px; color:#fff; font-size:12px; outline:none; box-shadow:0 0 10px rgba(0,255,135,0.25); pointer-events:auto; display:none;">
+</div>
+
+<button id="mpQuitBtn" style="display:none; position:absolute; top:20px; right:20px; padding:10px 22px; background:rgba(255,0,85,0.2); border:2px solid #ff0055; color:#fff; font-family:'Segoe UI',sans-serif; font-size:12px; font-weight:800; border-radius:20px; cursor:pointer; text-transform:uppercase; letter-spacing:1px; box-shadow:0 0 15px rgba(255,0,85,0.3); transition:all 0.2s ease; z-index:200;" onmouseover="this.style.background='rgba(255,0,85,0.55)'; this.style.boxShadow='0 0 20px rgba(255,0,85,0.6)'; this.style.transform='scale(1.05)';" onmouseout="this.style.background='rgba(255,0,85,0.2)'; this.style.boxShadow='0 0 15px rgba(255,0,85,0.3)'; this.style.transform='scale(1)';">
+  ❌ QUITTER
+</button>
+
 <button id="fsBtn">📱 Plein écran (Recommandé)</button>
 <audio id="bgMusic" src="Velocity_Park.mp3" preload="auto" loop></audio>
 <audio id="deathMusic" src="cat-laughing-at-you.mp3" preload="auto"></audio>
@@ -302,6 +411,30 @@ let introCam = { zoom: 1.0, yOffset: 0, xOffset: 0, tilt: 0 };
 let introCompilingTriggered = false;
 let introLandingTriggered = false;
 
+// === MULTIPLAYER & CHAT STATE (MQTT) ===
+let mp = {
+  client: null,
+  state: 'offline', // 'offline', 'connecting', 'lobby', 'in-world'
+  nickname: 'Joueur_' + Math.floor(Math.random() * 900 + 100),
+  myColors: { c1: '#d946ef', c2: '#00c9ff' },
+  activeWorlds: {},
+  currentWorld: null,
+  players: {},
+  myId: 'usr_' + Math.floor(Math.random() * 1000000),
+  chatMessages: [],
+  chatHistory: [],
+  chatHistoryLoaded: false,
+  lastPublishTime: 0
+};
+let sandboxP = {
+  vx: 0,
+  maxSpeed: 380,
+  accel: 1800,
+  friction: 1200,
+  keys: { left: false, right: false }
+};
+let chatActive = false;
+
 let spaceSpams = 0;
 let currentRoast = "Aucun mort détecté... pour l'instant ! 😈";
 let totalSalt = 0;
@@ -389,6 +522,25 @@ const isInsideSlideBtn = (ex, ey) => {
 };
 const dn=e=>{
   spaceSpams++;
+  if (state === 'multiplayerSandbox') {
+    if (chatActive) return;
+    const ex = getEventX(e);
+    const ey = getEventY(e);
+    if (ex !== null && ey !== null) {
+      if (ey < H() * 0.5) {
+        sandboxP.keys.jump = true;
+      } else {
+        if (ex < W() * 0.5) {
+          sandboxP.keys.left = true;
+          sandboxP.keys.right = false;
+        } else {
+          sandboxP.keys.right = true;
+          sandboxP.keys.left = false;
+        }
+      }
+    }
+    return;
+  }
   if(state==='play'&&gameMode==='cube'){
     const ex=getEventX(e),ey=getEventY(e);
     if(ex!==null&&ey!==null&&isInsideSlideBtn(ex,ey)){
@@ -414,23 +566,89 @@ const dn=e=>{
     gameMode='cube';
     cdParts=[];
     cdBeats={n3:false,n2:false,n1:false,go:false};
+    document.getElementById('menuMpBtnOverlay').style.display='none';
     startMusic();
   }
-  else if(state==='win'){state='menu';camX=0;progress=0;}
+  else if(state==='win'){state='menu';camX=0;progress=0;document.getElementById('menuMpBtnOverlay').style.display='flex';}
 };
-const up=e=>{inp=false;inpSlide=false;};
+const up=e=>{
+  if (state === 'multiplayerSandbox') {
+    sandboxP.keys.left = false;
+    sandboxP.keys.right = false;
+    sandboxP.keys.jump = false;
+    return;
+  }
+  inp=false;inpSlide=false;
+};
+const mv=e=>{
+  if (state === 'multiplayerSandbox' && !chatActive) {
+    // Only respond to touch drag, not passive mouse hover
+    if (e.type === 'mousemove' && !(e.buttons & 1)) return;
+    const ex = getEventX(e);
+    const ey = getEventY(e);
+    if (ex !== null && ey !== null) {
+      if (ey > H() * 0.5) {
+        if (ex < W() * 0.5) {
+          sandboxP.keys.left = true;
+          sandboxP.keys.right = false;
+        } else {
+          sandboxP.keys.right = true;
+          sandboxP.keys.left = false;
+        }
+      }
+    }
+  }
+};
 addEventListener('keydown',e=>{
+  if (state === 'multiplayerSandbox') {
+    if (chatActive) {
+      if (e.code === 'Enter') {
+        e.preventDefault();
+        sendChatMessage();
+      } else if (e.code === 'Escape') {
+        e.preventDefault();
+        closeChat();
+      }
+      return;
+    }
+    if (e.code === 'Enter' || e.code === 'Slash') {
+      e.preventDefault();
+      openChat();
+      return;
+    }
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA' || e.code === 'KeyQ') {
+      sandboxP.keys.left = true;
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      sandboxP.keys.right = true;
+    } else if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+      e.preventDefault();
+      sandboxP.keys.jump = true;
+    }
+    return;
+  }
   if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){e.preventDefault();dn();}
   else if(e.code==='ArrowDown'||e.code==='KeyS'||e.code==='ShiftLeft'||e.code==='ControlLeft'){e.preventDefault();inpSlide=true;}
 });
 addEventListener('keyup',e=>{
+  if (state === 'multiplayerSandbox') {
+    if (chatActive) return;
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA' || e.code === 'KeyQ') {
+      sandboxP.keys.left = false;
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      sandboxP.keys.right = false;
+    } else if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+      sandboxP.keys.jump = false;
+    }
+    return;
+  }
   if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW')up();
   else if(e.code==='ArrowDown'||e.code==='KeyS'||e.code==='ShiftLeft'||e.code==='ControlLeft')inpSlide=false;
 });
-canvas.addEventListener('mousedown',dn);canvas.addEventListener('mouseup',up);
+canvas.addEventListener('mousedown',dn);canvas.addEventListener('mouseup',up);canvas.addEventListener('mousemove',mv);
 canvas.addEventListener('touchstart',e=>{e.preventDefault();dn(e);},{passive:false});
 canvas.addEventListener('touchend',e=>{e.preventDefault();up(e);},{passive:false});
 canvas.addEventListener('touchcancel',e=>{e.preventDefault();up(e);},{passive:false});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();mv(e);},{passive:false});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 document.addEventListener('gesturestart',e=>e.preventDefault());
 document.addEventListener('gesturechange',e=>e.preventDefault());
@@ -693,6 +911,10 @@ function drawStar5(cx5,cy5,r5,rot5){ctx.beginPath();for(let i=0;i<5;i++){const a
 
 // === UPDATE ===
 function update(dt){
+  if (state === 'multiplayerSandbox') {
+    updateSandbox(dt);
+    return;
+  }
   if(state==='win'){gTime+=dt;winT+=dt;if(Math.random()<dt*3)spFW(Math.random()*W(),Math.random()*H()*.6);updPart(dt);return;}
   
   if(state==='introCinematic'){
@@ -1537,6 +1759,44 @@ function drawSpdLines(){
 }
 
 function drawGround(){
+  if (state === 'multiplayerSandbox') {
+    const w=W(),h=H(),gy=groundY();
+    const ts=TILE/2,cols=Math.ceil(w/ts)+2,rows=Math.ceil((h-gy)/ts)+1;
+    const ox=-Math.floor(camX%ts);
+    
+    // Checkered plaine
+    for(let r=0;r<rows;r++) {
+      for(let c=0;c<cols;c++){
+        const wx=c+Math.floor(camX/ts),dk=(wx+r)%2===0;
+        ctx.fillStyle=dk?'rgba(26,10,58,.95)':'rgba(34,14,74,.95)';
+        ctx.fillRect(ox+c*ts,gy+r*ts,ts+1,ts+1);
+      }
+    }
+    
+    // Glowing neon ground lines
+    ctx.save();
+    ctx.shadowColor=C.cg;
+    ctx.shadowBlur=15+beatP*8;
+    ctx.strokeStyle=C.cg;
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(0, gy);
+    ctx.lineTo(w, gy);
+    ctx.stroke();
+    ctx.restore();
+    
+    ctx.save();
+    ctx.shadowColor=C.c2;
+    ctx.shadowBlur=30;
+    ctx.strokeStyle=`rgba(0,201,255,${.12+beatP*.08})`;
+    ctx.lineWidth=6;
+    ctx.beginPath();
+    ctx.moveTo(0, gy);
+    ctx.lineTo(w, gy);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
   const w=W(),h=H(),gy=groundY(),ts=TILE/2,sc=Math.floor(camX/ts),ox=-(camX%ts);
   const rows=Math.ceil((h-gy)/ts)+1,cols=Math.ceil(w/ts)+2;
   
@@ -1680,6 +1940,7 @@ function drawGround(){
 }
 
 function drawObs(){
+  if (state === 'multiplayerSandbox') return;
   const gy=groundY(),t=gTime;
   for(const o of obs){
     const ox=o.x-camX;if(ox>W()+TILE*2||ox<-TILE*2)continue;
@@ -3206,6 +3467,7 @@ function drawWin(){
 
 // === CAT EASTER EGG ===
 function drawCat(){
+  if (state === 'multiplayerSandbox') return;
   // Trigger at ~95% (col 500 area = the staircase)
   if(!catTriggered&&progress>=.93){catTriggered=true;catShow=4;tShake(25);tFlash('#ff6600',.6);}
   if(catShow<=0)return;
@@ -3296,6 +3558,7 @@ function drawIntro(){
 
 // === HOLOGRAPHIC SLIDE WARNING ===
 function drawSlideWarning() {
+  if (state === 'multiplayerSandbox') return;
   if (P.x < 178 * TILE || P.x > 190 * TILE) return;
 
   const w = W(), h = H();
@@ -3363,6 +3626,7 @@ function drawSlideWarning() {
 
 // === CYBER-CAT BOSS RENDERERS ===
 function drawCyberBoss() {
+  if (state === 'multiplayerSandbox') return;
   if (P.x < 442 * TILE && bossCinematic.state === 'inactive') return;
   
   let fade = 0;
@@ -3923,6 +4187,7 @@ function drawCyberBoss() {
 }
 
 function drawBossLasers() {
+  if (state === 'multiplayerSandbox') return;
   if (P.x < 442 * TILE) return;
   const w = W(), h = H(), gy = groundY();
   
@@ -4338,6 +4603,19 @@ function loop(ts){
   drawPart();
   drawBossLasers();
   if(state==='play'||state==='countdown'||(state==='introCinematic' && introCinematicTimer >= 2.8)) drawPlayer();
+  if(state==='multiplayerSandbox') {
+    drawPlayer();
+    drawRemotePlayers();
+    ctx.save();
+    ctx.fillStyle = '#00ff87';
+    ctx.shadowColor = C.c1;
+    ctx.shadowBlur = 8;
+    ctx.font = 'bold 11px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(mp.nickname + ' (Vous)', P.x - camX + P.w / 2, P.y - 8);
+    ctx.restore();
+  }
   
   ctx.restore();
   
@@ -4382,6 +4660,558 @@ function loop(ts){
 
   requestAnimationFrame(loop);
 }
+
+// === MULTIPLAYER NETWORKING & PHYSICS INTEGRATION ===
+let lobbyHeartbeatInterval = null;
+let lobbyPruningInterval = null;
+
+function connectMQTT() {
+  if (mp.client) return;
+  mp.state = 'connecting';
+  
+  const broker = 'wss://broker.emqx.io:8084/mqtt';
+  mp.client = mqtt.connect(broker, {
+    clientId: mp.myId,
+    clean: true,
+    connectTimeout: 5000,
+    reconnectPeriod: 2000
+  });
+  
+  mp.client.on('connect', () => {
+    mp.state = 'lobby';
+    mp.client.subscribe('neon-rush/lobby/worlds/+', { qos: 0 });
+    addChatSystemMessage("📡 Connecté avec succès au réseau Neon Rush !");
+  });
+  
+  mp.client.on('message', (topic, message) => {
+    const payloadStr = message.toString();
+    
+    // Global Lobby updates: neon-rush/lobby/worlds/<worldId>
+    if (topic.startsWith('neon-rush/lobby/worlds/')) {
+      const worldId = topic.substring('neon-rush/lobby/worlds/'.length);
+      if (!payloadStr) {
+        delete mp.activeWorlds[worldId];
+      } else {
+        try {
+          const room = JSON.parse(payloadStr);
+          mp.activeWorlds[worldId] = room;
+        } catch (e) {}
+      }
+      updateWorldsListUI();
+      return;
+    }
+    
+    // In-world updates
+    if (mp.currentWorld) {
+      // Players coordinates: neon-rush/worlds/<worldId>/players/<playerId>
+      const playerPrefix = `neon-rush/worlds/${mp.currentWorld.id}/players/`;
+      if (topic.startsWith(playerPrefix)) {
+        const playerId = topic.substring(playerPrefix.length);
+        if (playerId === mp.myId) return;
+        
+        if (!payloadStr) {
+          delete mp.players[playerId];
+        } else {
+          try {
+            const data = JSON.parse(payloadStr);
+            if (!mp.players[playerId]) {
+              mp.players[playerId] = { rx: data.x, ry: data.y };
+              addChatSystemMessage(`👋 ${data.nickname} a rejoint le monde !`);
+            }
+            mp.players[playerId].x = data.x;
+            mp.players[playerId].y = data.y;
+            mp.players[playerId].rot = data.rot;
+            mp.players[playerId].sliding = data.sliding;
+            mp.players[playerId].color1 = data.color1;
+            mp.players[playerId].color2 = data.color2;
+            mp.players[playerId].nickname = data.nickname;
+            mp.players[playerId].lastUpdate = Date.now();
+          } catch (e) {}
+        }
+        return;
+      }
+      
+      // Chat message: neon-rush/worlds/<worldId>/chat
+      const chatTopic = `neon-rush/worlds/${mp.currentWorld.id}/chat`;
+      if (topic === chatTopic) {
+        try {
+          const chat = JSON.parse(payloadStr);
+          addChatUserMessage(chat.sender, chat.text);
+          // Track in local history
+          mp.chatHistory.push({ sender: chat.sender, text: chat.text, t: Date.now() });
+          if (mp.chatHistory.length > 30) mp.chatHistory.shift();
+        } catch (e) {}
+        return;
+      }
+      
+      // Chat history (retained): neon-rush/worlds/<worldId>/chat-history
+      const histTopic = `neon-rush/worlds/${mp.currentWorld.id}/chat-history`;
+      if (topic === histTopic) {
+        if (!mp.chatHistoryLoaded) {
+          mp.chatHistoryLoaded = true;
+          try {
+            const hist = JSON.parse(payloadStr);
+            if (Array.isArray(hist)) {
+              for (const msg of hist) {
+                addChatUserMessage(msg.sender, msg.text);
+              }
+              mp.chatHistory = hist.slice();
+            }
+          } catch (e) {}
+        }
+        return;
+      }
+    }
+  });
+  
+  mp.client.on('error', () => {
+    mp.state = 'offline';
+    addChatSystemMessage("❌ Erreur de connexion au serveur de salon.");
+  });
+  
+  mp.client.on('close', () => {
+    mp.state = 'offline';
+  });
+}
+
+function startLobbyPublisher() {
+  if (lobbyHeartbeatInterval) clearInterval(lobbyHeartbeatInterval);
+  if (lobbyPruningInterval) clearInterval(lobbyPruningInterval);
+  
+  // Host heartbeats published to global lobby every 2s
+  lobbyHeartbeatInterval = setInterval(() => {
+    if (mp.client && mp.currentWorld && mp.currentWorld.hostId === mp.myId) {
+      const topic = `neon-rush/lobby/worlds/${mp.currentWorld.id}`;
+      const payload = JSON.stringify({
+        id: mp.currentWorld.id,
+        name: mp.currentWorld.name,
+        host: mp.nickname,
+        playersCount: Object.keys(mp.players).length + 1,
+        lastActive: Date.now()
+      });
+      mp.client.publish(topic, payload, { qos: 0, retain: true });
+    }
+  }, 2000);
+  
+  // Inactive players timeout pruning
+  lobbyPruningInterval = setInterval(() => {
+    const now = Date.now();
+    if (state === 'multiplayerSandbox') {
+      for (const id in mp.players) {
+        if (now - mp.players[id].lastUpdate > 6000) {
+          addChatSystemMessage(`💀 ${mp.players[id].nickname} est parti (déconnexion)`);
+          delete mp.players[id];
+        }
+      }
+    }
+    
+    // Prune stale rooms in listing UI
+    for (const wid in mp.activeWorlds) {
+      if (now - mp.activeWorlds[wid].lastActive > 6000) {
+        delete mp.activeWorlds[wid];
+      }
+    }
+    updateWorldsListUI();
+  }, 3000);
+}
+
+function updateWorldsListUI() {
+  const container = document.getElementById('mpWorldsList');
+  if (!container) return;
+  
+  const wKeys = Object.keys(mp.activeWorlds);
+  if (wKeys.length === 0) {
+    container.innerHTML = `<div style="text-align:center; color:#777; font-size:13px; margin-top:60px;">Aucun salon actif détecté. Créez-en un !</div>`;
+    return;
+  }
+  
+  let html = '';
+  for (const wid of wKeys) {
+    const room = mp.activeWorlds[wid];
+    html += `
+      <div class="mp-world-item">
+        <div>
+          <div style="font-weight:800; font-size:14px; color:#00ff87;">🌍 ${room.name}</div>
+          <div style="font-size:11px; color:#aaa; margin-top:4px;">Hôte : ${room.host}</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="font-size:12px; font-weight:700; color:#00c9ff;">👥 ${room.playersCount}</span>
+          <button class="mp-join-btn" onclick="joinWorld('${room.id}', '${room.name.replace(/'/g, "\\'")}', '${room.host.replace(/'/g, "\\'")}')">Entrer</button>
+        </div>
+      </div>
+    `;
+  }
+  container.innerHTML = html;
+}
+
+function joinWorld(id, name, host) {
+  const nickInput = document.getElementById('mpNick').value.trim();
+  if (nickInput) {
+    mp.nickname = nickInput;
+  }
+  
+  mp.currentWorld = {
+    id: id,
+    name: name,
+    host: host,
+    hostId: host === mp.nickname ? mp.myId : null
+  };
+  
+  mp.players = {};
+  mp.chatHistory = [];
+  mp.chatHistoryLoaded = false;
+  state = 'multiplayerSandbox';
+  
+  // Position flat on floor
+  P.x = 100;
+  P.y = groundY() - P.h;
+  P.vy = 0;
+  sandboxP.vx = 0;
+  sandboxP.keys.left = false;
+  sandboxP.keys.right = false;
+  sandboxP.keys.jump = false;
+  
+  connectMQTT();
+  
+  const sub = () => {
+    if (mp.client && mp.client.connected) {
+      mp.client.subscribe(`neon-rush/worlds/${id}/players/+`, { qos: 0 });
+      mp.client.subscribe(`neon-rush/worlds/${id}/chat`, { qos: 0 });
+      mp.client.subscribe(`neon-rush/worlds/${id}/chat-history`, { qos: 0 });
+      
+      startLobbyPublisher();
+      publishPosition();
+      
+      addChatSystemMessage(`🚀 Monde rejoint : ${name}`);
+      addChatSystemMessage("💡 Appuyez sur Entrée ou / pour chater !");
+    } else {
+      setTimeout(sub, 250);
+    }
+  };
+  sub();
+  
+  document.getElementById('mpLobby').style.display = 'none';
+  document.getElementById('chatContainer').style.display = 'block';
+  document.getElementById('mpQuitBtn').style.display = 'block';
+}
+
+function leaveCurrentWorld() {
+  if (!mp.currentWorld) return;
+  
+  if (mp.client) {
+    const playerTopic = `neon-rush/worlds/${mp.currentWorld.id}/players/${mp.myId}`;
+    mp.client.publish(playerTopic, '', { qos: 0, retain: true });
+    
+    mp.client.unsubscribe(`neon-rush/worlds/${mp.currentWorld.id}/players/+`);
+    mp.client.unsubscribe(`neon-rush/worlds/${mp.currentWorld.id}/chat`);
+    
+    if (mp.currentWorld.hostId === mp.myId) {
+      const lobbyTopic = `neon-rush/lobby/worlds/${mp.currentWorld.id}`;
+      mp.client.publish(lobbyTopic, '', { qos: 0, retain: true });
+    }
+  }
+  
+  if (lobbyHeartbeatInterval) clearInterval(lobbyHeartbeatInterval);
+  if (lobbyPruningInterval) clearInterval(lobbyPruningInterval);
+  lobbyHeartbeatInterval = null;
+  lobbyPruningInterval = null;
+  
+  mp.currentWorld = null;
+  mp.players = {};
+  
+  document.getElementById('chatContainer').style.display = 'none';
+  document.getElementById('mpQuitBtn').style.display = 'none';
+  document.getElementById('menuMpBtnOverlay').style.display = 'flex';
+  
+  state = 'menu';
+  camX = 0;
+  progress = 0;
+  startMusic();
+}
+
+function openChat() {
+  if (chatActive) return;
+  chatActive = true;
+  const input = document.getElementById('chatInput');
+  input.style.display = 'block';
+  input.focus();
+}
+
+function closeChat() {
+  if (!chatActive) return;
+  chatActive = false;
+  const input = document.getElementById('chatInput');
+  input.value = '';
+  input.style.display = 'none';
+  canvas.focus();
+}
+
+function sendChatMessage() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (text && mp.client && mp.currentWorld) {
+    const topic = `neon-rush/worlds/${mp.currentWorld.id}/chat`;
+    const payload = JSON.stringify({
+      sender: mp.nickname,
+      text: text
+    });
+    mp.client.publish(topic, payload, { qos: 0, retain: false });
+    
+    // Update retained chat history for new joiners
+    mp.chatHistory.push({ sender: mp.nickname, text: text, t: Date.now() });
+    if (mp.chatHistory.length > 30) mp.chatHistory.shift();
+    const histTopic = `neon-rush/worlds/${mp.currentWorld.id}/chat-history`;
+    mp.client.publish(histTopic, JSON.stringify(mp.chatHistory), { qos: 0, retain: true });
+  }
+  closeChat();
+}
+
+function addChatUserMessage(sender, text) {
+  const history = document.getElementById('chatHistory');
+  if (!history) return;
+  
+  const div = document.createElement('div');
+  const isMe = sender === mp.nickname;
+  const color = isMe ? '#00ff87' : '#ff0055';
+  const nameLabel = isMe ? `${sender} (Vous)` : sender;
+  
+  div.innerHTML = `<span style="color:${color}; font-weight:900; text-shadow:0 0 4px ${color};">[${nameLabel}]:</span> <span style="color:#ffffff;">${text}</span>`;
+  history.appendChild(div);
+  
+  while (history.children.length > 40) {
+    history.removeChild(history.firstChild);
+  }
+  history.scrollTop = history.scrollHeight;
+}
+
+function addChatSystemMessage(text) {
+  const history = document.getElementById('chatHistory');
+  if (!history) return;
+  
+  const div = document.createElement('div');
+  div.innerHTML = `<span style="color:#00ffff; font-style:italic; font-weight:bold; text-shadow:0 0 4px #00ffff;">⚡ [SYSTÈME]: ${text}</span>`;
+  history.appendChild(div);
+  
+  while (history.children.length > 40) {
+    history.removeChild(history.firstChild);
+  }
+  history.scrollTop = history.scrollHeight;
+}
+
+function publishPosition() {
+  if (mp.client && mp.currentWorld) {
+    const topic = `neon-rush/worlds/${mp.currentWorld.id}/players/${mp.myId}`;
+    const payload = JSON.stringify({
+      x: P.x,
+      y: P.y,
+      rot: P.rot,
+      sliding: P.sliding,
+      color1: mp.myColors.c1,
+      color2: mp.myColors.c2,
+      nickname: mp.nickname,
+      timestamp: Date.now()
+    });
+    mp.client.publish(topic, payload, { qos: 0, retain: false });
+  }
+}
+
+function updateSandbox(dt) {
+  gTime += dt;
+  
+  // Smooth camera following
+  const targetCamX = Math.max(0, P.x - W() / 2);
+  camX += (targetCamX - camX) * 8 * dt;
+  if (Math.abs(camX - targetCamX) < 1) camX = targetCamX;
+  
+  const gy = groundY();
+  
+  // Horizontal movement acceleration/friction
+  if (sandboxP.keys.left) {
+    sandboxP.vx -= sandboxP.accel * dt;
+    if (sandboxP.vx < -sandboxP.maxSpeed) sandboxP.vx = -sandboxP.maxSpeed;
+  } else if (sandboxP.keys.right) {
+    sandboxP.vx += sandboxP.accel * dt;
+    if (sandboxP.vx > sandboxP.maxSpeed) sandboxP.vx = sandboxP.maxSpeed;
+  } else {
+    if (sandboxP.vx > 0) {
+      sandboxP.vx -= sandboxP.friction * dt;
+      if (sandboxP.vx < 0) sandboxP.vx = 0;
+    } else if (sandboxP.vx < 0) {
+      sandboxP.vx += sandboxP.friction * dt;
+      if (sandboxP.vx > 0) sandboxP.vx = 0;
+    }
+  }
+  
+  P.x += sandboxP.vx * dt;
+  if (P.x < 100) { P.x = 100; sandboxP.vx = 0; }
+  
+  // Vertical gravity & jumping
+  P.vy += GRAVITY * dt;
+  if (sandboxP.keys.jump && P.onG) {
+    P.vy = JUMP_VEL;
+    P.onG = false;
+    spJump(P.x - camX + P.w/2, P.y + P.h);
+  }
+  
+  P.y += P.vy * dt;
+  P.onG = false;
+  
+  // Floor collision (sandbox flat checkered plaine)
+  if (P.y + P.h >= gy) {
+    P.y = gy - P.h;
+    P.vy = 0;
+    P.onG = true;
+  }
+  
+  // Premium aesthetic rotations
+  if (P.onG) {
+    P.sq += (1 - P.sq) * 12 * dt;
+    P.st += (1 - P.st) * 12 * dt;
+    P.rot = 0; P.tRot = 0;
+  } else {
+    P.rot += 340 * dt;
+    const vn = Math.abs(P.vy) / 820;
+    P.st = 1 + vn * 0.15;
+    P.sq = 1 - vn * 0.08;
+  }
+  
+  // Visual neon trailing spark trails
+  if (Math.abs(sandboxP.vx) > 50 && P.onG) {
+    if (Math.random() < 0.35) {
+      const p = fxPool.get();
+      p.x = P.x - camX + Math.random() * P.w;
+      p.y = gy - 3;
+      p.vx = -sandboxP.vx * 0.3 + (Math.random() - 0.5) * 60;
+      p.vy = -30 - Math.random() * 80;
+      p.s = 1.5 + Math.random() * 2.5;
+      p.a = 1.0;
+      p.l = 0.35 + Math.random() * 0.2;
+      p.c = Math.random() < 0.5 ? mp.myColors.c1 : mp.myColors.c2;
+      
+      trail.push({ x: P.x + P.w / 2, y: P.y + P.h / 2, a: 1.0 });
+    }
+  }
+  
+  if (trail.length > 25) trail.shift();
+  for (let i = trail.length - 1; i >= 0; i--) {
+    trail[i].a -= dt * 2.5;
+    if (trail[i].a <= 0) trail.splice(i, 1);
+  }
+  
+  updPart(dt);
+  
+  // Publish positional packets at throttled 45ms rate
+  const now = Date.now();
+  if (now - mp.lastPublishTime >= 45) {
+    mp.lastPublishTime = now;
+    publishPosition();
+  }
+}
+
+function drawRemotePlayers() {
+  if (state !== 'multiplayerSandbox') return;
+  ctx.save();
+  for (const id in mp.players) {
+    const r = mp.players[id];
+    if (r.rx === undefined) {
+      r.rx = r.x;
+      r.ry = r.y;
+    } else {
+      r.rx += (r.x - r.rx) * 0.25;
+      r.ry += (r.y - r.ry) * 0.25;
+    }
+    
+    ctx.save();
+    ctx.globalAlpha = 0.65;
+    ctx.translate(r.rx - camX + P.w / 2, r.ry + P.h / 2);
+    ctx.rotate(r.rot || 0);
+    
+    const c1 = r.color1 || '#d946ef';
+    const c2 = r.color2 || '#00c9ff';
+    const grad = ctx.createLinearGradient(-P.w/2, -P.h/2, P.w/2, P.h/2);
+    grad.addColorStop(0, c1);
+    grad.addColorStop(1, c2);
+    ctx.fillStyle = grad;
+    
+    ctx.beginPath();
+    ctx.roundRect(-P.w/2, -P.h/2, P.w, P.h, 6);
+    ctx.fill();
+    
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.shadowColor = c1;
+    ctx.shadowBlur = 8;
+    ctx.stroke();
+    
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    if (r.sliding) {
+      ctx.fillRect(-10, -4, 5, 2);
+      ctx.fillRect(5, -4, 5, 2);
+    } else {
+      ctx.fillRect(-11, -8, 5, 5);
+      ctx.fillRect(6, -8, 5, 5);
+    }
+    ctx.restore();
+    
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = c1;
+    ctx.shadowBlur = 6;
+    ctx.font = 'bold 11px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(r.nickname || 'Joueur', r.rx - camX + P.w / 2, r.ry - 8);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// UI Click bindings & Global attachments
+document.getElementById('menuMpBtn').onclick = () => {
+  document.getElementById('mpLobby').style.display = 'flex';
+  document.getElementById('menuMpBtnOverlay').style.display = 'none';
+  connectMQTT();
+  document.getElementById('mpNick').value = mp.nickname;
+  if (bgMusic) bgMusic.pause();
+};
+
+document.getElementById('mpBtnBack').onclick = () => {
+  document.getElementById('mpLobby').style.display = 'none';
+  document.getElementById('menuMpBtnOverlay').style.display = 'flex';
+  startMusic();
+};
+
+document.getElementById('mpBtnCreate').onclick = () => {
+  const nick = document.getElementById('mpNick').value.trim() || mp.nickname;
+  mp.nickname = nick;
+  
+  const rName = document.getElementById('mpWorldName').value.trim() || `Salon de ${nick}`;
+  const worldId = 'wld_' + Math.floor(Math.random() * 1000000);
+  
+  joinWorld(worldId, rName, nick);
+};
+
+document.getElementById('mpQuitBtn').onclick = () => {
+  leaveCurrentWorld();
+};
+
+// Global scope bindings for inline HTML templates
+window.joinWorld = joinWorld;
+window.leaveCurrentWorld = leaveCurrentWorld;
+window.connectMQTT = connectMQTT;
+window.openChat = openChat;
+window.closeChat = closeChat;
+window.sendChatMessage = sendChatMessage;
+window.updateSandbox = updateSandbox;
+window.drawRemotePlayers = drawRemotePlayers;
+
+// Color randomization profile generator
+mp.myColors = {
+  c1: ['#d946ef', '#00ff87', '#ff0055', '#ffdd00'][Math.floor(Math.random() * 4)],
+  c2: ['#00c9ff', '#ffe600', '#00ffaa', '#ff5588'][Math.floor(Math.random() * 4)]
+};
+
 P.x=100;P.y=groundY()-P.h;requestAnimationFrame(loop);
 </script>
 </body>
