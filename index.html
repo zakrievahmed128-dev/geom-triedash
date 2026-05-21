@@ -4726,12 +4726,13 @@ function connectMQTT() {
         } else {
           try {
             const data = JSON.parse(payloadStr);
+            const absoluteY = data.y + groundY();
             if (!mp.players[playerId]) {
-              mp.players[playerId] = { rx: data.x, ry: data.y };
+              mp.players[playerId] = { rx: data.x, ry: absoluteY };
               addChatSystemMessage(`👋 ${data.nickname} a rejoint le monde !`);
             }
             mp.players[playerId].x = data.x;
-            mp.players[playerId].y = data.y;
+            mp.players[playerId].y = absoluteY;
             mp.players[playerId].rot = data.rot;
             mp.players[playerId].sliding = data.sliding;
             mp.players[playerId].color1 = data.color1;
@@ -4748,13 +4749,16 @@ function connectMQTT() {
       if (topic === chatTopic) {
         try {
           const chat = JSON.parse(payloadStr);
+          if (chat.senderId === mp.myId) return; // Already handled locally
+          
           addChatUserMessage(chat.sender, chat.text);
           // Set chat bubble for the sender
           const expiration = Date.now() + 5000;
-          if (chat.sender === mp.nickname) {
-            mp.myChatMsg = { text: chat.text, expires: expiration };
+          
+          if (chat.senderId && mp.players[chat.senderId]) {
+             mp.players[chat.senderId].chatMsg = { text: chat.text, expires: expiration };
           } else {
-            // Find player by nickname
+            // Fallback for older clients
             for (const id in mp.players) {
               if (mp.players[id].nickname === chat.sender) {
                 mp.players[id].chatMsg = { text: chat.text, expires: expiration };
@@ -4762,11 +4766,10 @@ function connectMQTT() {
               }
             }
           }
-          // Track in local history if it's not from us (since we already added it when sending)
-          if (chat.sender !== mp.nickname) {
-            mp.chatHistory.push({ sender: chat.sender, text: chat.text, t: Date.now() });
-            if (mp.chatHistory.length > 30) mp.chatHistory.shift();
-          }
+          
+          // Track in local history
+          mp.chatHistory.push({ sender: chat.sender, text: chat.text, t: Date.now() });
+          if (mp.chatHistory.length > 30) mp.chatHistory.shift();
         } catch (e) {}
         return;
       }
@@ -4980,9 +4983,13 @@ function sendChatMessage() {
     const topic = `neon-rush/worlds/${mp.currentWorld.id}/chat`;
     const payload = JSON.stringify({
       sender: mp.nickname,
+      senderId: mp.myId,
       text: text
     });
     mp.client.publish(topic, payload, { qos: 0, retain: false });
+    
+    // Local display
+    addChatUserMessage(mp.nickname, text);
     
     // Set local chat bubble immediately
     mp.myChatMsg = { text: text, expires: Date.now() + 5000 };
@@ -5035,7 +5042,7 @@ function publishPosition() {
     const topic = `neon-rush/worlds/${mp.currentWorld.id}/players/${mp.myId}`;
     const payload = JSON.stringify({
       x: P.x,
-      y: P.y,
+      y: P.y - groundY(),
       rot: P.rot,
       sliding: P.sliding,
       color1: mp.myColors.c1,
@@ -5141,9 +5148,9 @@ function updateSandbox(dt) {
   
   updPart(dt);
   
-  // Publish positional packets at throttled 30ms rate
+  // Publish positional packets at throttled 100ms rate
   const now = Date.now();
-  if (now - mp.lastPublishTime >= 30) {
+  if (now - mp.lastPublishTime >= 100) {
     mp.lastPublishTime = now;
     publishPosition();
   }
