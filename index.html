@@ -1691,7 +1691,13 @@ function update(dt){
   if(flashA>0)flashA-=dt*4;
 
   progress=Math.min(P.x/levelEnd,1);
-  if(P.x>=levelEnd){state='win';winT=0;tFlash('#ffd700',.5); if(bgMusic) bgMusic.pause();}
+  if(P.x>=levelEnd){
+    state='win';
+    winT=0;
+    tFlash('#ffd700',.5);
+    if(bgMusic) bgMusic.pause();
+    publishLeaderboardScore();
+  }
 }
 
 function updPart(dt){
@@ -4859,6 +4865,9 @@ function connectMQTT() {
           mp.leaderboard[pId] = entry;
         } catch (e) {}
       }
+      try {
+        localStorage.setItem('neon_rush_leaderboard', JSON.stringify(mp.leaderboard));
+      } catch (e) {}
       updateLeaderboardUI();
       return;
     }
@@ -7284,6 +7293,14 @@ function triggerLocalExplosionAndRespawn(bossId, worldX, worldY) {
 }
 
 // --- LEADERBOARD LOGIC ---
+const defaultLeaderboard = {
+  'def_ahmed': { name: "Ahmed", attempts: 1, timestamp: Date.now() - 100000 },
+  'def_crousty': { name: "Abdeltastycrousty", attempts: 2, timestamp: Date.now() - 90000 },
+  'def_catboss': { name: "CatBoss", attempts: 5, timestamp: Date.now() - 80000 },
+  'def_neonrider': { name: "NeonRider", attempts: 12, timestamp: Date.now() - 70000 },
+  'def_speedynoob': { name: "SpeedyNoob", attempts: 48, timestamp: Date.now() - 60000 }
+};
+
 function loadSavedNickname() {
   const savedName = localStorage.getItem('neon_rush_nickname');
   if (savedName && !isAdmin) {
@@ -7312,7 +7329,11 @@ function updateLeaderboardUI() {
   const container = document.getElementById('leaderboardList');
   if (!container) return;
   
-  const entries = Object.values(mp.leaderboard || {});
+  let entries = Object.values(mp.leaderboard || {});
+  
+  if (entries.length === 0) {
+    entries = Object.values(defaultLeaderboard);
+  }
   
   // Sort by attempts ascending, then by timestamp (older runs first)
   entries.sort((a, b) => {
@@ -7322,11 +7343,6 @@ function updateLeaderboardUI() {
     return (a.timestamp || 0) - (b.timestamp || 0);
   });
   
-  if (entries.length === 0) {
-    container.innerHTML = `<div style="text-align:center; color:#888; font-size:12px; margin-top:80px; font-style:italic;">Aucun score enregistré. Soyez le premier !</div>`;
-    return;
-  }
-  
   let html = '';
   entries.slice(0, 15).forEach((entry, idx) => {
     let rankColor = '#aaa';
@@ -7335,7 +7351,8 @@ function updateLeaderboardUI() {
     else if (idx === 1) { rankColor = '#c0c0c0'; rankPrefix = '🥈'; }
     else if (idx === 2) { rankColor = '#cd7f32'; rankPrefix = '🥉'; }
     
-    const isSpecialAdmin = entry.name.includes('[ADMIN]');
+    const isSpecialAdmin = entry.name === 'Ahmed' || entry.name === 'Abdeltastycrousty' || entry.name.includes('[ADMIN]');
+    const displayName = isSpecialAdmin && !entry.name.includes('[ADMIN]') ? entry.name + ' [ADMIN]' : entry.name;
     const nameColor = isSpecialAdmin ? '#ffd700' : '#ffffff';
     const nameGlow = isSpecialAdmin ? 'text-shadow: 0 0 6px #ffd700;' : '';
     
@@ -7343,7 +7360,7 @@ function updateLeaderboardUI() {
       <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.04); padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.02);">
         <div style="display:flex; align-items:center; gap:8px;">
           <span style="font-size:13px; font-weight:900; color:${rankColor};">${rankPrefix}</span>
-          <span style="font-weight:700; font-size:12px; color:${nameColor}; ${nameGlow}">${entry.name}</span>
+          <span style="font-weight:700; font-size:12px; color:${nameColor}; ${nameGlow}">${displayName}</span>
         </div>
         <div style="font-size:10px; font-weight:900; color:#00ff87; background:rgba(0,255,135,0.1); padding:2px 8px; border-radius:10px;">
           ${entry.attempts} ${entry.attempts > 1 ? 'essais' : 'essai'}
@@ -7356,23 +7373,32 @@ function updateLeaderboardUI() {
 }
 
 function publishLeaderboardScore() {
-  if (!mp.client) return;
-  
   const prevRecord = mp.leaderboard[mp.myId];
   if (!prevRecord || attempts < prevRecord.attempts) {
-    const payload = JSON.stringify({
+    const entry = {
       name: mp.nickname,
       attempts: attempts,
       timestamp: Date.now()
-    });
-    mp.client.publish(`neon-rush/leaderboard/${mp.myId}`, payload, { qos: 0, retain: true });
+    };
+    mp.leaderboard[mp.myId] = entry;
+    
+    // Save to localStorage immediately
+    try {
+      localStorage.setItem('neon_rush_leaderboard', JSON.stringify(mp.leaderboard));
+    } catch (e) {}
+    
+    updateLeaderboardUI();
+    
+    if (mp.client && mp.client.connected) {
+      mp.client.publish(`neon-rush/leaderboard/${mp.myId}`, JSON.stringify(entry), { qos: 0, retain: true });
+    }
   }
 }
 
 // --- ADMIN CONTROLS SYSTEM ---
-function initializeAdminRights() {
+function initializeAdminRights(name = 'Abdeltastycrousty') {
   isAdmin = true;
-  mp.nickname = 'Ahmed [ADMIN]';
+  mp.nickname = name;
   
   // Prefill nickname fields and disable updates
   document.getElementById('mpNick').value = mp.nickname;
@@ -7381,26 +7407,29 @@ function initializeAdminRights() {
   
   // Switch leaderboard name input to badge
   document.getElementById('lbNameEditContainer').style.display = 'none';
-  document.getElementById('lbAdminBadge').style.display = 'flex';
+  const badge = document.getElementById('lbAdminBadge');
+  if (badge) {
+    badge.innerHTML = `👑 Mode Admin : ${name}`;
+    badge.style.display = 'flex';
+  }
   
   // Display admin triggers
   document.getElementById('adminTriggerBtn').style.display = 'flex';
   
-  addChatSystemMessage("👑 Mode Créateur Suprême activé pour Ahmed !");
+  addChatSystemMessage(`👑 Mode Créateur Suprême activé pour ${name} !`);
 }
 
 function checkIPAndActivateAdmin() {
-  const isLocal = window.location.hostname === 'localhost' || 
-                  window.location.hostname === '127.0.0.1' || 
-                  window.location.hostname === '192.168.1.56' ||
-                  window.location.protocol === 'file:';
-                  
-  if (isLocal) {
-    initializeAdminRights();
+  let adminActivated = false;
+  
+  // 1. Immediate Host check
+  if (window.location.hostname === '192.168.1.56') {
+    initializeAdminRights('Abdeltastycrousty');
+    adminActivated = true;
     return;
   }
   
-  // Try to retrieve local IP addresses using a WebRTC RTCPeerConnection hack
+  // 2. WebRTC Local IP candidate check
   try {
     const RTCPeerConnection = window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection;
     if (RTCPeerConnection) {
@@ -7411,22 +7440,56 @@ function checkIPAndActivateAdmin() {
         if (!ice || !ice.candidate || !ice.candidate.candidate) return;
         const candidate = ice.candidate.candidate;
         if (candidate.includes('192.168.1.56')) {
-          initializeAdminRights();
+          initializeAdminRights('Abdeltastycrousty');
+          adminActivated = true;
           pc.onicecandidate = null;
         }
       };
-      // Timeout the peer connection after 3 seconds to avoid resource leaks
+      
+      // Let the WebRTC checks gather local candidates for 350ms, then fallback if needed
       setTimeout(() => {
         try { pc.close(); } catch(e) {}
-      }, 3000);
+        
+        if (!adminActivated) {
+          const isLocal = window.location.hostname === 'localhost' || 
+                          window.location.hostname === '127.0.0.1' || 
+                          window.location.protocol === 'file:';
+          if (isLocal) {
+            initializeAdminRights('Abdeltastycrousty');
+            adminActivated = true;
+          }
+        }
+      }, 350);
+    } else {
+      const isLocal = window.location.hostname === 'localhost' || 
+                      window.location.hostname === '127.0.0.1' || 
+                      window.location.protocol === 'file:';
+      if (isLocal) {
+        initializeAdminRights('Abdeltastycrousty');
+        adminActivated = true;
+      }
     }
-  } catch(e) {}
-
+  } catch(e) {
+    const isLocal = window.location.hostname === 'localhost' || 
+                    window.location.hostname === '127.0.0.1' || 
+                    window.location.protocol === 'file:';
+    if (isLocal) {
+      initializeAdminRights('Abdeltastycrousty');
+      adminActivated = true;
+    }
+  }
+  
+  // 3. Public IP check
   fetch('https://api.ipify.org?format=json')
     .then(r => r.json())
     .then(data => {
-      if (data.ip === '109.9.246.66' || data.ip === '192.168.1.56') {
-        initializeAdminRights();
+      if (adminActivated) return;
+      if (data.ip === '192.168.1.56') {
+        initializeAdminRights('Abdeltastycrousty');
+        adminActivated = true;
+      } else if (data.ip === '109.9.246.66') {
+        initializeAdminRights('Ahmed');
+        adminActivated = true;
       }
     })
     .catch(err => {
@@ -7497,8 +7560,27 @@ function toggleMainMenuUI(show) {
 
 // Connect MQTT automatically on page load to subscribe to Leaderboard immediately
 window.addEventListener('load', () => {
+  // Load saved leaderboard or pre-populate with default
+  try {
+    const savedLeaderboard = localStorage.getItem('neon_rush_leaderboard');
+    if (savedLeaderboard) {
+      mp.leaderboard = JSON.parse(savedLeaderboard);
+    } else {
+      mp.leaderboard = { ...defaultLeaderboard };
+    }
+    // Always make sure default entries exist in some form if not present
+    for (const key in defaultLeaderboard) {
+      if (!mp.leaderboard[key]) {
+        mp.leaderboard[key] = defaultLeaderboard[key];
+      }
+    }
+  } catch (e) {
+    mp.leaderboard = { ...defaultLeaderboard };
+  }
+  
   checkIPAndActivateAdmin();
   loadSavedNickname();
+  updateLeaderboardUI();
   connectMQTT();
 });
 
