@@ -473,7 +473,7 @@ function initBossLasers() {
 initBossLasers();
 
 // === STATE ===
-let state='menu',attempts=1,camX=0,progress=0,lastT=0;
+let state='menu',attempts=1,completions=parseInt(localStorage.getItem('neon_rush_completions') || '0', 10),camX=0,progress=0,lastT=0;
 let gravFlip=1,speedMult=1,gameMode='cube',timeWarpTimer=0;
 let usedOrbs=new Set(),usedPortals=new Set(),usedPads=new Set(),coins=new Set();
 let trail=[],bgStars=[],bgNeb=[];
@@ -1696,6 +1696,10 @@ function update(dt){
     winT=0;
     tFlash('#ffd700',.5);
     if(bgMusic) bgMusic.pause();
+    completions++;
+    try {
+      localStorage.setItem('neon_rush_completions', completions);
+    } catch(e) {}
     publishLeaderboardScore();
   }
 }
@@ -7327,13 +7331,27 @@ async function fetchCloudLeaderboard() {
         if (entry && entry.name) {
           const playerId = entry.playerId || `cloud_${entry.name}_${entry.timestamp || Date.now()}`;
           const existing = mp.leaderboard[playerId];
-          if (!existing || entry.attempts < existing.attempts) {
+          const newComp = entry.completions || 1;
+          
+          if (!existing) {
             mp.leaderboard[playerId] = {
               playerId: playerId,
               name: entry.name,
               attempts: entry.attempts,
+              completions: newComp,
               timestamp: entry.timestamp || Date.now()
             };
+          } else {
+            const existingComp = existing.completions || 1;
+            if (newComp > existingComp || (newComp === existingComp && entry.attempts < existing.attempts)) {
+              mp.leaderboard[playerId] = {
+                playerId: playerId,
+                name: entry.name,
+                attempts: entry.attempts,
+                completions: newComp,
+                timestamp: entry.timestamp || Date.now()
+              };
+            }
           }
         }
       });
@@ -7360,7 +7378,11 @@ async function saveCloudLeaderboard(newEntry) {
     
     const existingIndex = scores.findIndex(s => s.playerId === newEntry.playerId || s.name === newEntry.name);
     if (existingIndex !== -1) {
-      if (newEntry.attempts < scores[existingIndex].attempts) {
+      const existingComp = scores[existingIndex].completions || 1;
+      const newComp = newEntry.completions || 1;
+      if (newComp > existingComp) {
+        scores[existingIndex] = newEntry;
+      } else if (newComp === existingComp && newEntry.attempts < scores[existingIndex].attempts) {
         scores[existingIndex] = newEntry;
       }
     } else {
@@ -7372,8 +7394,14 @@ async function saveCloudLeaderboard(newEntry) {
       if (!s || !s.name) return;
       const normName = s.name.replace(/\s*\[ADMIN\]/i, '').trim();
       const existing = uniqueScoresMap[normName];
-      if (!existing || s.attempts < existing.attempts) {
+      if (!existing) {
         uniqueScoresMap[normName] = s;
+      } else {
+        const existingComp = existing.completions || 1;
+        const sComp = s.completions || 1;
+        if (sComp > existingComp || (sComp === existingComp && s.attempts < existing.attempts)) {
+          uniqueScoresMap[normName] = s;
+        }
       }
     });
     scores = Object.values(uniqueScoresMap);
@@ -7435,15 +7463,26 @@ function updateLeaderboardUI() {
     if (!entry || !entry.name) return;
     const normName = entry.name.replace(/\s*\[ADMIN\]/i, '').trim();
     const existing = uniqueEntries[normName];
-    if (!existing || entry.attempts < existing.attempts) {
+    if (!existing) {
       uniqueEntries[normName] = entry;
+    } else {
+      const existingComp = existing.completions || 1;
+      const entryComp = entry.completions || 1;
+      if (entryComp > existingComp || (entryComp === existingComp && entry.attempts < existing.attempts)) {
+        uniqueEntries[normName] = entry;
+      }
     }
   });
   entries = Object.values(uniqueEntries);
   
   entries.sort((a, b) => {
+    const compA = a.completions || 1;
+    const compB = b.completions || 1;
+    if (compA !== compB) {
+      return compB - compA; // Priorité au nombre de victoires (décroissant)
+    }
     if (a.attempts !== b.attempts) {
-      return a.attempts - b.attempts;
+      return a.attempts - b.attempts; // Puis au nombre d'essais minimal (croissant)
     }
     return (a.timestamp || 0) - (b.timestamp || 0);
   });
@@ -7472,14 +7511,23 @@ function updateLeaderboardUI() {
     const nameColor = isSpecialAdmin ? '#ffd700' : '#ffffff';
     const nameGlow = isSpecialAdmin ? 'text-shadow: 0 0 6px #ffd700;' : '';
     
+    const attemptsText = entry.attempts === 1 ? '1 essai' : `${entry.attempts} essais`;
+    const completionsCount = entry.completions || 1;
+    const completionsText = completionsCount === 1 ? '1 victoire' : `${completionsCount} victoires`;
+    
     html += `
       <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.04); padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.02);">
         <div style="display:flex; align-items:center; gap:8px;">
           <span style="font-size:13px; font-weight:900; color:${rankColor};">${rankPrefix}</span>
           <span style="font-weight:700; font-size:12px; color:${nameColor}; ${nameGlow}">${displayName}</span>
         </div>
-        <div style="font-size:10px; font-weight:900; color:#00ff87; background:rgba(0,255,135,0.1); padding:2px 8px; border-radius:10px;">
-          ${entry.attempts} ${entry.attempts > 1 ? 'essais' : 'essai'}
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+          <div style="font-size:10px; font-weight:900; color:#00ff87; background:rgba(0,255,135,0.1); padding:2px 8px; border-radius:10px;">
+            ${attemptsText}
+          </div>
+          <div style="font-size:9px; font-weight:900; color:#ff007f; background:rgba(255,0,127,0.1); padding:2px 8px; border-radius:10px;">
+            🏆 ${completionsText}
+          </div>
         </div>
       </div>
     `;
@@ -7490,11 +7538,15 @@ function updateLeaderboardUI() {
 
 function publishLeaderboardScore() {
   const prevRecord = mp.leaderboard[mp.myId];
-  if (!prevRecord || attempts < prevRecord.attempts) {
+  const currentCompletions = completions || 1;
+  const prevComp = prevRecord ? (prevRecord.completions || 1) : 0;
+  
+  if (!prevRecord || currentCompletions > prevComp || (currentCompletions === prevComp && attempts < prevRecord.attempts)) {
     const entry = {
       playerId: mp.myId,
       name: mp.nickname,
       attempts: attempts,
+      completions: currentCompletions,
       timestamp: Date.now()
     };
     mp.leaderboard[mp.myId] = entry;
