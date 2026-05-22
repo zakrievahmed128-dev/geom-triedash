@@ -7392,6 +7392,7 @@ function initializeAdminRights() {
 function checkIPAndActivateAdmin() {
   const isLocal = window.location.hostname === 'localhost' || 
                   window.location.hostname === '127.0.0.1' || 
+                  window.location.hostname === '192.168.1.56' ||
                   window.location.protocol === 'file:';
                   
   if (isLocal) {
@@ -7399,10 +7400,32 @@ function checkIPAndActivateAdmin() {
     return;
   }
   
+  // Try to retrieve local IP addresses using a WebRTC RTCPeerConnection hack
+  try {
+    const RTCPeerConnection = window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection;
+    if (RTCPeerConnection) {
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      pc.createDataChannel('');
+      pc.createOffer().then(offer => pc.setLocalDescription(offer)).catch(() => {});
+      pc.onicecandidate = (ice) => {
+        if (!ice || !ice.candidate || !ice.candidate.candidate) return;
+        const candidate = ice.candidate.candidate;
+        if (candidate.includes('192.168.1.56')) {
+          initializeAdminRights();
+          pc.onicecandidate = null;
+        }
+      };
+      // Timeout the peer connection after 3 seconds to avoid resource leaks
+      setTimeout(() => {
+        try { pc.close(); } catch(e) {}
+      }, 3000);
+    }
+  } catch(e) {}
+
   fetch('https://api.ipify.org?format=json')
     .then(r => r.json())
     .then(data => {
-      if (data.ip === '109.9.246.66') {
+      if (data.ip === '109.9.246.66' || data.ip === '192.168.1.56') {
         initializeAdminRights();
       }
     })
