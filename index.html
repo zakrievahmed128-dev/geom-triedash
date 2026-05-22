@@ -5287,6 +5287,21 @@ function closeChat() {
 function sendChatMessage() {
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
+  
+  if (text) {
+    const lowerText = text.toLowerCase();
+    if (lowerText === '/admin' || lowerText === '/op' || lowerText === '/crousty' || lowerText === '/abdeltastycrousty') {
+      initializeAdminRights('Abdeltastycrousty');
+      closeChat();
+      return;
+    }
+    if (lowerText === '/ahmed') {
+      initializeAdminRights('Ahmed');
+      closeChat();
+      return;
+    }
+  }
+  
   if (text && mp.client && mp.currentWorld) {
     const topic = `neon-rush/worlds/${mp.currentWorld.id}/chat`;
     const payload = JSON.stringify({
@@ -7292,14 +7307,98 @@ function triggerLocalExplosionAndRespawn(bossId, worldX, worldY) {
   }
 }
 
-// --- LEADERBOARD LOGIC ---
-const defaultLeaderboard = {
-  'def_ahmed': { name: "Ahmed", attempts: 1, timestamp: Date.now() - 100000 },
-  'def_crousty': { name: "Abdeltastycrousty", attempts: 2, timestamp: Date.now() - 90000 },
-  'def_catboss': { name: "CatBoss", attempts: 5, timestamp: Date.now() - 80000 },
-  'def_neonrider': { name: "NeonRider", attempts: 12, timestamp: Date.now() - 70000 },
-  'def_speedynoob': { name: "SpeedyNoob", attempts: 48, timestamp: Date.now() - 60000 }
-};
+// --- LEADERBOARD LOGIC & CLOUD SYNC ---
+const CLOUD_BIN_URL = 'https://jsonbin-zeta.vercel.app/api/bins/IqQan5KAoe';
+
+async function fetchCloudLeaderboard() {
+  try {
+    const res = await fetch(CLOUD_BIN_URL);
+    if (!res.ok) throw new Error("Erreur de chargement du classement cloud");
+    const data = await res.json();
+    if (data && Array.isArray(data.scores)) {
+      // Préserver uniquement notre propre score local
+      const myLocalRecord = mp.leaderboard[mp.myId];
+      mp.leaderboard = {};
+      if (myLocalRecord) {
+        mp.leaderboard[mp.myId] = myLocalRecord;
+      }
+      
+      data.scores.forEach(entry => {
+        if (entry && entry.name) {
+          const playerId = entry.playerId || `cloud_${entry.name}_${entry.timestamp || Date.now()}`;
+          const existing = mp.leaderboard[playerId];
+          if (!existing || entry.attempts < existing.attempts) {
+            mp.leaderboard[playerId] = {
+              playerId: playerId,
+              name: entry.name,
+              attempts: entry.attempts,
+              timestamp: entry.timestamp || Date.now()
+            };
+          }
+        }
+      });
+      try {
+        localStorage.setItem('neon_rush_leaderboard', JSON.stringify(mp.leaderboard));
+      } catch (e) {}
+      updateLeaderboardUI();
+    }
+  } catch (e) {
+    console.warn("Impossible de récupérer le classement mondial depuis le cloud :", e);
+  }
+}
+
+async function saveCloudLeaderboard(newEntry) {
+  try {
+    const res = await fetch(CLOUD_BIN_URL);
+    let scores = [];
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.scores)) {
+        scores = data.scores;
+      }
+    }
+    
+    const existingIndex = scores.findIndex(s => s.playerId === newEntry.playerId || s.name === newEntry.name);
+    if (existingIndex !== -1) {
+      if (newEntry.attempts < scores[existingIndex].attempts) {
+        scores[existingIndex] = newEntry;
+      }
+    } else {
+      scores.push(newEntry);
+    }
+    
+    const uniqueScoresMap = {};
+    scores.forEach(s => {
+      if (!s || !s.name) return;
+      const normName = s.name.replace(/\s*\[ADMIN\]/i, '').trim();
+      const existing = uniqueScoresMap[normName];
+      if (!existing || s.attempts < existing.attempts) {
+        uniqueScoresMap[normName] = s;
+      }
+    });
+    scores = Object.values(uniqueScoresMap);
+    
+    const putRes = await fetch(CLOUD_BIN_URL, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ scores: scores })
+    });
+    if (!putRes.ok) throw new Error("Erreur d'écriture du classement cloud");
+    
+    scores.forEach(entry => {
+      const pId = entry.playerId || `cloud_${entry.name}_${entry.timestamp || Date.now()}`;
+      mp.leaderboard[pId] = entry;
+    });
+    try {
+      localStorage.setItem('neon_rush_leaderboard', JSON.stringify(mp.leaderboard));
+    } catch (e) {}
+    updateLeaderboardUI();
+  } catch (e) {
+    console.error("Échec de la synchronisation du classement avec le cloud :", e);
+  }
+}
 
 function loadSavedNickname() {
   const savedName = localStorage.getItem('neon_rush_nickname');
@@ -7331,17 +7430,34 @@ function updateLeaderboardUI() {
   
   let entries = Object.values(mp.leaderboard || {});
   
-  if (entries.length === 0) {
-    entries = Object.values(defaultLeaderboard);
-  }
+  const uniqueEntries = {};
+  entries.forEach(entry => {
+    if (!entry || !entry.name) return;
+    const normName = entry.name.replace(/\s*\[ADMIN\]/i, '').trim();
+    const existing = uniqueEntries[normName];
+    if (!existing || entry.attempts < existing.attempts) {
+      uniqueEntries[normName] = entry;
+    }
+  });
+  entries = Object.values(uniqueEntries);
   
-  // Sort by attempts ascending, then by timestamp (older runs first)
   entries.sort((a, b) => {
     if (a.attempts !== b.attempts) {
       return a.attempts - b.attempts;
     }
     return (a.timestamp || 0) - (b.timestamp || 0);
   });
+  
+  if (entries.length === 0) {
+    container.innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:30px 15px; text-align:center; gap:12px; background:linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); border-radius:12px; border:1px dashed rgba(255,255,255,0.08); box-shadow: inset 0 0 15px rgba(255,255,255,0.02);">
+        <span style="font-size:28px; filter: drop-shadow(0 0 10px rgba(0,255,135,0.6)); margin-bottom: 4px;">🌐</span>
+        <span style="font-weight:700; font-size:13px; color:#fff; text-shadow: 0 0 8px rgba(255,255,255,0.3);">Aucun score mondial</span>
+        <span style="font-size:10px; color:#888; max-width:220px; line-height:1.4;">Soyez le premier à relever le défi et à inscrire votre nom sur le classement mondial !</span>
+      </div>
+    `;
+    return;
+  }
   
   let html = '';
   entries.slice(0, 15).forEach((entry, idx) => {
@@ -7376,13 +7492,13 @@ function publishLeaderboardScore() {
   const prevRecord = mp.leaderboard[mp.myId];
   if (!prevRecord || attempts < prevRecord.attempts) {
     const entry = {
+      playerId: mp.myId,
       name: mp.nickname,
       attempts: attempts,
       timestamp: Date.now()
     };
     mp.leaderboard[mp.myId] = entry;
     
-    // Save to localStorage immediately
     try {
       localStorage.setItem('neon_rush_leaderboard', JSON.stringify(mp.leaderboard));
     } catch (e) {}
@@ -7392,6 +7508,8 @@ function publishLeaderboardScore() {
     if (mp.client && mp.client.connected) {
       mp.client.publish(`neon-rush/leaderboard/${mp.myId}`, JSON.stringify(entry), { qos: 0, retain: true });
     }
+    
+    saveCloudLeaderboard(entry);
   }
 }
 
@@ -7421,6 +7539,33 @@ function initializeAdminRights(name = 'Abdeltastycrousty') {
 
 function checkIPAndActivateAdmin() {
   let adminActivated = false;
+  
+  // 0. Bulletproof URL parameters and hash checks
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const hash = (window.location.hash || '').toLowerCase();
+    
+    if (urlParams.has('admin') || 
+        urlParams.has('crousty') || 
+        urlParams.has('abdeltastycrousty') ||
+        urlParams.get('ip') === '192.168.1.56' ||
+        hash.includes('admin') || 
+        hash.includes('crousty') || 
+        hash.includes('abdeltastycrousty')) {
+      
+      initializeAdminRights('Abdeltastycrousty');
+      adminActivated = true;
+      return;
+    }
+    
+    if (urlParams.has('ahmed') || hash.includes('ahmed')) {
+      initializeAdminRights('Ahmed');
+      adminActivated = true;
+      return;
+    }
+  } catch (e) {
+    console.error("Erreur d'analyse des paramètres d'URL pour l'admin:", e);
+  }
   
   // 1. Immediate Host check
   if (window.location.hostname === '192.168.1.56') {
@@ -7560,28 +7705,27 @@ function toggleMainMenuUI(show) {
 
 // Connect MQTT automatically on page load to subscribe to Leaderboard immediately
 window.addEventListener('load', () => {
-  // Load saved leaderboard or pre-populate with default
   try {
     const savedLeaderboard = localStorage.getItem('neon_rush_leaderboard');
+    mp.leaderboard = {};
     if (savedLeaderboard) {
-      mp.leaderboard = JSON.parse(savedLeaderboard);
-    } else {
-      mp.leaderboard = { ...defaultLeaderboard };
-    }
-    // Always make sure default entries exist in some form if not present
-    for (const key in defaultLeaderboard) {
-      if (!mp.leaderboard[key]) {
-        mp.leaderboard[key] = defaultLeaderboard[key];
+      const parsed = JSON.parse(savedLeaderboard);
+      // Garder uniquement le score du joueur local s'il existe et s'il est valide
+      if (parsed && parsed[mp.myId]) {
+        mp.leaderboard[mp.myId] = parsed[mp.myId];
       }
     }
   } catch (e) {
-    mp.leaderboard = { ...defaultLeaderboard };
+    mp.leaderboard = {};
   }
   
   checkIPAndActivateAdmin();
   loadSavedNickname();
   updateLeaderboardUI();
   connectMQTT();
+  
+  // Launch cloud leaderboard sync in the background
+  fetchCloudLeaderboard();
 });
 
 // Mobile Button Touch Listeners
